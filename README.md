@@ -75,6 +75,15 @@ PYTHONPATH=src:third_party/rsl_rl python -u run.py --mode play \
 
 ### 历史翻转诊断配置（当前先不运行）
 
+已能站立后，使用 `configs/flip_from_balance.toml`，配合
+`--checkpoint "$ELF3_RUNTIME_ROOT/runs/balance_zero_payload_adaptive_01/best.pt"`。
+此配置为 512 环境、最多 1000 轮、每 20 轮评估；平地、附加质量 0 kg、从第 0 帧开始、不启用倒序课程，不接近高台。
+加载 balance 权重时会自动初始化此前恒定的夹爪任务输入、腕部历史输入及被屏蔽的腕输出，
+保留其他网络参数，并写入 `standing_transfer.json`。这是一种热启动，不能保证翻转过程中持续平衡。
+不要用普通 `--segment flip --checkpoint <balance权重>` 绕过该配置。
+初始迁移的两环境检查维持到回合上限 7.46 秒，未摔倒或触发碰撞；翻转尚未学会。
+小规模一轮 PPO 启动检查已完成，正式翻转收敛未验证。播放此阶段权重也应使用该配置，以保持平地场景一致。
+
 ```bash
 python -u run.py --config configs/flip_4090.toml --mode train \
   --headless --device cuda:0 \

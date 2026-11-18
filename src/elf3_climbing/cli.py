@@ -34,6 +34,7 @@ def parser(settings=None):
     p.add_argument("--play-speed", type=float, default=1.0, help="play: 0.5 is half speed")
     p.add_argument("--view", choices=["rear-left", "front", "left", "right"], default="rear-left")
     p.add_argument("--no-curriculum", action="store_true")
+    p.add_argument("--flat-ground", action="store_true")
     p.add_argument("--no-pose-init", action="store_true")
     p.add_argument(
         "--output", type=Path, help="Required: a new directory under ELF3_RUNTIME_ROOT/runs"
@@ -119,6 +120,7 @@ def main():
         cfg.sim.device = args.device
         cfg.reference_path = str(args.reference)
         cfg.segment = args.segment
+        cfg.flat_ground = args.flat_ground
         cfg.random_start = False
         cfg.curriculum_enabled = args.mode == "train" and not args.no_curriculum
         cfg.reward_stage = args.reward_stage
@@ -195,6 +197,22 @@ def main():
                     "Checkpoint observation schema mismatch; implicit padding is forbidden"
                 )
             runner.load(str(args.checkpoint), load_optimizer=False)
+            if previous_segment == "balance" and args.segment == "flip":
+                if args.mode != "train" or not args.flat_ground or not args.no_curriculum:
+                    raise ValueError(
+                        "Standing-to-flip transfer requires train, --flat-ground and --no-curriculum"
+                    )
+                from .transfer import standing_to_flip
+
+                transfer = standing_to_flip(
+                    runner.alg.policy,
+                    runner.obs_normalizer,
+                    runner.privileged_obs_normalizer,
+                    env.wrist_joint,
+                    (env.ref["joint_pos"][0, env.wrist_joint] - env.nominal[0, env.wrist_joint])
+                    / cfg.action_scale,
+                )
+                (output / "standing_transfer.json").write_text(json.dumps(transfer, indent=2))
             print(
                 f"CHECKPOINT_NOTE: configured gripper added mass is {env.gripper_mass_report['added_mass_kg']} kg; evaluate under this current model.",
                 flush=True,

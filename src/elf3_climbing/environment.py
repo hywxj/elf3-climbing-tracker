@@ -79,6 +79,7 @@ class TrackerCfg(DirectRLEnvCfg):
     robot_cfg = conservative_robot_cfg()
     reference_path: str = str(DEFAULT_PACK)
     segment: str = "flip"
+    flat_ground: bool = False
     random_start: bool = False
     curriculum_enabled: bool = False
     reward_stage: str = "prior"
@@ -99,10 +100,21 @@ class TrackerEnv(DirectRLEnv):
         self.reference_np, self.reference_manifest = read_pack(cfg.reference_path)
         self.balance_only = cfg.segment == "balance"
         self.task_report = {"task": cfg.segment, "flip_required": True}
-        if self.balance_only:
+        if self.balance_only or cfg.flat_ground:
             from .balance import ground_standing_reference
 
             self.reference_np, self.task_report = ground_standing_reference(self.reference_np)
+            if not self.balance_only:
+                if cfg.segment != "flip":
+                    raise ValueError("Flat-ground override supports flip only")
+                self.task_report.update(
+                    task="flip_ground_v1",
+                    flip_required=True,
+                    initial_wrist_angle_rad=self.task_report["wrist_target_rad"],
+                    wrist_target_rad=GripperRules().target_angle,
+                    scope="Flip reference on the initial foot-supporting ground; no approach or high platform",
+                )
+        if self.balance_only:
             cfg.curriculum_enabled = False
             cfg.random_start = False
             cfg.end_hold_steps = 250
@@ -197,7 +209,7 @@ class TrackerEnv(DirectRLEnv):
         )
         self.rules = GripperRules()
         self.curriculum = BackwardCurriculum(step=cfg.curriculum_step)
-        if self.balance_only:
+        if not cfg.curriculum_enabled:
             self.curriculum.phase = 0.0
         self.training_mode = False
         self.use_curriculum = False
