@@ -17,7 +17,7 @@ from .training_control import (
 
 def suite(runner, wrapped, phase):
     start = evaluate(runner, wrapped, 0.0)
-    tail = evaluate(runner, wrapped, 0.9)
+    tail = start if wrapped.env.balance_only else evaluate(runner, wrapped, 0.9)
     current = start if phase == 0 else tail if phase == 0.9 else evaluate(runner, wrapped, phase)
     probe = (
         evaluate(runner, wrapped, phase, hold_steps=50)
@@ -70,7 +70,8 @@ def train(runner, wrapped, args, output):
     runner.alg.policy.log_std.requires_grad_(False)
     runner.current_learning_iteration = 0  # --checkpoint is an explicit warm start, not resume
     contract = {
-        "protocol": "precision_tracking_v10",
+        "protocol": "ground_balance_v1" if env.balance_only else "precision_tracking_v10",
+        "task": env.task_report,
         "reward_version": "tolerant_reference_velocity_v9",
         "reference": str(args.reference),
         "segment": args.segment,
@@ -78,7 +79,7 @@ def train(runner, wrapped, args, output):
         "real_lidar": "NOT CONNECTED",
         "gripper_dynamics": env.gripper_mass_report,
         "gripper_rules": asdict(env.rules),
-        "gripper_requirement_relaxed": False,
+        "gripper_requirement_relaxed": env.balance_only,
         "additional_terminal_stability": {
             "scope": "Completion only; current segment ends in a held pose. No absolute-speed episode termination.",
             "linear_velocity_error_m_s": 0.25,
@@ -95,7 +96,11 @@ def train(runner, wrapped, args, output):
         "exploration": {
             "learned_variance": False,
             "wrist_fixed": True,
-            "balance_schedule": "halve after two matching-phase 1 s probes >=90% if sampled full-hold success <80%; promotion still requires full hold",
+            "balance_schedule": (
+                "halve after two full 5 s evaluations >=90% if sampled success <80%"
+                if env.balance_only
+                else "halve after two matching-phase 1 s probes >=90% if sampled full-hold success <80%; promotion still requires full hold"
+            ),
             "balance_minimum_std": exploration.minimum,
             "joint_std": runner.policy_cfg["init_noise_std"],
             "wrist_std": args.wrist_noise_std,
@@ -126,7 +131,7 @@ def train(runner, wrapped, args, output):
     exploration.std = initial_balance_std(
         args.balance_noise_std,
         restored_balance_std,
-        before["short_probe"]["success_fraction"],
+        before["current" if env.balance_only else "short_probe"]["success_fraction"],
         args.balance_noise_explicit,
     )
     exploration.minimum = min(exploration.minimum, exploration.std)
@@ -199,7 +204,9 @@ def train(runner, wrapped, args, output):
                 progress=hold_progress,
             )
             annealed = not reason and exploration.observe(
-                phase, results["short_probe"]["success_fraction"], training_rate
+                phase,
+                phase_rate if env.balance_only else results["short_probe"]["success_fraction"],
+                training_rate,
             )
             if annealed:
                 with torch.no_grad():

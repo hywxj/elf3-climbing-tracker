@@ -1,0 +1,28 @@
+# Ground stance only; no flip and no gripper payload mass.
+[run]
+segment = "balance"
+reward_stage = "prior"
+num_envs = 512
+iterations = 300
+eval_interval = 20
+early_stop_patience = 3
+failure_warmup_iterations = 300
+no_curriculum = true
+wrist_noise_std = 0.005
+balance_noise_std = 0.08
+seed = 42
+
+[ppo]
+num_steps_per_env = 48
+save_interval = 20
+
+[ppo.algorithm]
+learning_rate = 0.0003
+schedule = "adaptive"
+clip_param = 0.2
+entropy_coef = 0.0
+num_learning_epochs = 5
+num_mini_batches = 4
+
+[ppo.policy]
+init_noise_std = 0.01

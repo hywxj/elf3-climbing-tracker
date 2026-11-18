@@ -1,7 +1,8 @@
 {
-  "mass_kg": 0.5,
-  "mass_source": "User-provided gripper mass, 2026-11-18",
+  "mass_kg": 0.0,
+  "mass_source": "Training simplification requested by user: omit payload until motion learning works",
   "center_of_mass_model": "collision_envelope_center",
   "inertia_model": "uniform_collision_envelope_box",
-  "assumptions": "Only mass is user-provided. Center of mass and inertia are approximations from the existing padded box. No additional adapter mass is assumed."
+  "assumptions": "Training adds no gripper mass, COM shift or inertia. Collision envelope retained. Physical gripper mass remains 0.5 kg; load adaptation is deferred.",
+  "physical_mass_kg": 0.5
 }

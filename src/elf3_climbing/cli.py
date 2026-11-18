@@ -19,7 +19,7 @@ def parser(settings=None):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--mode", choices=["smoke", "train", "evaluate", "play"], default="smoke")
     p.add_argument("--reference", type=Path, default=DEFAULT_PACK)
-    p.add_argument("--segment", choices=["flip", "stand", "prepare"], default="flip")
+    p.add_argument("--segment", choices=["balance", "flip", "stand", "prepare"], default="flip")
     p.add_argument("--num-envs", type=int, default=4)
     p.add_argument("--steps", type=int, default=160)
     p.add_argument("--iterations", type=int, default=100)
@@ -146,6 +146,7 @@ def main():
             dim=-1,
         )
         mapping = {
+            "task": env.task_report,
             "gripper_dynamics": env.gripper_mass_report,
             "joint_names": env.reference_np["joint_names"].tolist(),
             "isaac_joint_indices": env.joint_ids,
@@ -184,13 +185,18 @@ def main():
         if args.checkpoint is not None:
             ckpt = torch.load(args.checkpoint, weights_only=True, map_location=env.device)
             weights = ckpt["model_state_dict"]
+            previous_segment = (ckpt.get("infos") or {}).get("contract", {}).get("segment")
+            if args.segment == "balance" and previous_segment != "balance":
+                raise ValueError(
+                    "Start balance from scratch or use a balance checkpoint; flip weights are not a standing prior"
+                )
             if weights["actor.0.weight"].shape != runner.alg.policy.actor[0].weight.shape:
                 raise ValueError(
                     "Checkpoint observation schema mismatch; implicit padding is forbidden"
                 )
             runner.load(str(args.checkpoint), load_optimizer=False)
             print(
-                "CHECKPOINT_NOTE: current gripper mass is included; older checkpoints may have been trained without it. Evaluate under the current model.",
+                f"CHECKPOINT_NOTE: configured gripper added mass is {env.gripper_mass_report['added_mass_kg']} kg; evaluate under this current model.",
                 flush=True,
             )
         elif args.mode == "train" and not args.no_pose_init:

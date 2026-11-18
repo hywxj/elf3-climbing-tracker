@@ -31,8 +31,8 @@ def specification():
     dynamics_raw = dynamics_path.read_bytes()
     dynamics = json.loads(dynamics_raw)
     mass = float(dynamics["mass_kg"])
-    if not np.isfinite(mass) or mass <= 0:
-        raise ValueError("Gripper mass must be finite and positive")
+    if not np.isfinite(mass) or mass < 0:
+        raise ValueError("Gripper mass must be finite and nonnegative")
     if (
         dynamics["center_of_mass_model"] != "collision_envelope_center"
         or dynamics["inertia_model"] != "uniform_collision_envelope_box"
@@ -46,7 +46,11 @@ def specification():
         "center_of_mass_in_wrist_m": (center / 1000).tolist(),
         "inertia_about_com_in_wrist_kg_m2": inertia.tolist(),
         "dynamics_config_sha256": hashlib.sha256(dynamics_raw).hexdigest(),
-        "analysis_scope": "Mass included; COM and inertia approximated, not measured",
+        "analysis_scope": (
+            "Mass omitted for motion learning; geometry retained"
+            if mass == 0
+            else "Mass included; COM and inertia approximated, not measured"
+        ),
         "dimensions_mm": dimensions.tolist(),
         "center_in_wrist_m": (center / 1000).tolist(),
         "half_size_m": (dimensions / 2000).tolist(),
@@ -69,32 +73,33 @@ def apply(root):
     original = body.find("inertial")
     if original is None or original.get("fullinertia") is None:
         raise ValueError("Expected explicit full wrist inertia from the URDF model builder")
-    xx, yy, zz, xy, xz, yz = np.fromstring(original.get("fullinertia"), sep=" ")
-    tensor = np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
-    mass, center, inertia = combine(
-        float(original.get("mass")),
-        np.fromstring(original.get("pos", "0 0 0"), sep=" "),
-        tensor,
-        cfg["mass_kg"],
-        cfg["center_of_mass_in_wrist_m"],
-        cfg["inertia_about_com_in_wrist_kg_m2"],
-    )
-    original.set("mass", format(mass, ".16g"))
-    original.set("pos", " ".join(format(x, ".16g") for x in center))
-    original.set(
-        "fullinertia",
-        " ".join(
-            format(x, ".16g")
-            for x in [
-                inertia[0, 0],
-                inertia[1, 1],
-                inertia[2, 2],
-                inertia[0, 1],
-                inertia[0, 2],
-                inertia[1, 2],
-            ]
-        ),
-    )
+    if cfg["mass_kg"] > 0:
+        xx, yy, zz, xy, xz, yz = np.fromstring(original.get("fullinertia"), sep=" ")
+        tensor = np.array([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
+        mass, center, inertia = combine(
+            float(original.get("mass")),
+            np.fromstring(original.get("pos", "0 0 0"), sep=" "),
+            tensor,
+            cfg["mass_kg"],
+            cfg["center_of_mass_in_wrist_m"],
+            cfg["inertia_about_com_in_wrist_kg_m2"],
+        )
+        original.set("mass", format(mass, ".16g"))
+        original.set("pos", " ".join(format(x, ".16g") for x in center))
+        original.set(
+            "fullinertia",
+            " ".join(
+                format(x, ".16g")
+                for x in [
+                    inertia[0, 0],
+                    inertia[1, 1],
+                    inertia[2, 2],
+                    inertia[0, 1],
+                    inertia[0, 2],
+                    inertia[1, 2],
+                ]
+            ),
+        )
     text = lambda values: " ".join(format(float(v), ".12g") for v in values)
     ET.SubElement(
         body,
@@ -129,6 +134,16 @@ def apply_usd_mass(prim):
     axes = api.GetPrincipalAxesAttr().Get()
     if mass_old is None or center_old is None or diag is None or axes is None:
         raise ValueError("Expected explicitly authored wrist mass, COM and inertia")
+    if cfg["mass_kg"] == 0:
+        return {
+            "enabled": True,
+            "added_mass_kg": 0.0,
+            "physical_mass_kg": cfg.get("physical_mass_kg"),
+            "original_wrist_mass_kg": float(mass_old),
+            "combined_wrist_mass_kg": float(mass_old),
+            "assumptions": cfg["assumptions"],
+            "dynamics_config_sha256": cfg["dynamics_config_sha256"],
+        }
     q = [axes.GetReal(), *axes.GetImaginary()]
     rotation = Rotation.from_quat(q, scalar_first=True).as_matrix()
     inertia_old = rotation @ np.diag(diag) @ rotation.T

@@ -97,7 +97,18 @@ class TrackerCfg(DirectRLEnvCfg):
 class TrackerEnv(DirectRLEnv):
     def __init__(self, cfg, **kwargs):
         self.reference_np, self.reference_manifest = read_pack(cfg.reference_path)
+        self.balance_only = cfg.segment == "balance"
+        self.task_report = {"task": cfg.segment, "flip_required": True}
+        if self.balance_only:
+            from .balance import ground_standing_reference
+
+            self.reference_np, self.task_report = ground_standing_reference(self.reference_np)
+            cfg.curriculum_enabled = False
+            cfg.random_start = False
+            cfg.end_hold_steps = 250
+            cfg.extra_budget_steps = 500
         segments = json.loads(str(self.reference_np["segments_json"]))
+        segments["balance"] = [0, 0]
         prepare = np.flatnonzero(
             np.isin(
                 self.reference_np["phase"],
@@ -117,7 +128,7 @@ class TrackerEnv(DirectRLEnv):
         )
         segments["prepare"] = [int(prepare[0]), int(prepare[-1])]
         if cfg.segment not in segments:
-            raise ValueError("Only flip/stand/prepare tracking experiments are enabled")
+            raise ValueError("Only balance/flip/stand/prepare tracking experiments are enabled")
         self.segment_start, self.segment_end = segments[cfg.segment]
         if cfg.segment == "flip":
             cfg.end_hold_steps = cfg.flip_hold_steps
@@ -186,6 +197,8 @@ class TrackerEnv(DirectRLEnv):
         )
         self.rules = GripperRules()
         self.curriculum = BackwardCurriculum(step=cfg.curriculum_step)
+        if self.balance_only:
+            self.curriculum.phase = 0.0
         self.training_mode = False
         self.use_curriculum = False
         self.curriculum_events = []
@@ -198,6 +211,9 @@ class TrackerEnv(DirectRLEnv):
         self.assumed_prerequisite = self.gate_latched.clone()
         self.reset_phase = torch.zeros(self.num_envs, device=self.device)
         self.wrist_joint = self.reference_np["joint_names"].tolist().index("l_wrist_y_joint")
+        if self.balance_only:
+            self.rules.target_angle = self.task_report["wrist_target_rad"]
+        self.fixed_wrist_target = float(self.rules.target_angle)
         self.wrist_body = self.robot.find_bodies("l_wrist_z_link", preserve_order=True)[0][0]
         self.approach_barrier = int(
             np.flatnonzero(self.reference_np["phase"] == "WALK_LEFT_CLEAR")[0]
@@ -437,7 +453,9 @@ class TrackerEnv(DirectRLEnv):
         )
         # Gripper clearance is a task command: contacts alone do not specify wrist roll.
         # Fixed per task, later supplied by the FSM; not a reference-pose observation.
-        grip = torch.tensor([-1.309, 1.0], device=self.device).expand(self.num_envs, -1)
+        grip = torch.tensor(
+            [self.fixed_wrist_target, float(not self.balance_only)], device=self.device
+        ).expand(self.num_envs, -1)
         actor = torch.cat(
             [
                 self.history.flatten(1),
@@ -468,6 +486,11 @@ class TrackerEnv(DirectRLEnv):
             raise ValueError("Nonfinite action")
         self.previous_actions.copy_(self.actions)
         self.actions.copy_(actions.clamp(-3.0, 3.0))
+        if self.balance_only:
+            # Hold the unflipped wrist through its normal actuator, not qpos writes.
+            self.actions[:, self.wrist_joint] = (
+                self.fixed_wrist_target - self.nominal[:, self.wrist_joint]
+            ) / self.cfg.action_scale
         desired = torch.clamp(
             self.nominal + self.cfg.action_scale * self.actions,
             self.limits[..., 0],
@@ -509,6 +532,12 @@ class TrackerEnv(DirectRLEnv):
         settle, latched, allowed, ready = advance_gate(
             ge, gv, clearance, self.gate_settle, self.gate_latched, self.rules
         )
+        if self.balance_only:
+            # No flip gate or flip-completion requirement in the standing task.
+            settle = torch.zeros_like(settle)
+            latched = torch.zeros_like(latched)
+            allowed = torch.ones_like(allowed)
+            ready = torch.ones_like(ready)
         self.gate_settle.copy_(settle)
         self.gate_latched.copy_(latched)
         self.gate_allowed.copy_(allowed)
@@ -535,6 +564,9 @@ class TrackerEnv(DirectRLEnv):
             self.rules,
         )
         lost_flip, collision = flip_retention_failures(ge, clearance, self.gate_latched, self.rules)
+        if self.balance_only:
+            premature = torch.zeros_like(premature)
+            lost_flip = torch.zeros_like(lost_flip)
         failure = (
             (pos > 0.45)
             | (angle > 1.1)
@@ -669,6 +701,7 @@ class TrackerEnv(DirectRLEnv):
         imitation_weight = 1.0 if self.cfg.reward_stage == "prior" else 0.35
         gripper_score = (1 - ge.abs() / 1.309).clamp(0, 1)
         forearm_orientation = torch.exp(-up.square() / 0.12) * self.hold_mask[i].float()
+        flip_weight = 0.0 if self.balance_only else 1.0
         target_linear, target_angular = self.target_root_velocities(i)
         linear_velocity_error, angular_velocity_error = velocity_tracking_errors(
             d.root_link_lin_vel_w, d.root_ang_vel_w, target_linear, target_angular
@@ -686,9 +719,12 @@ class TrackerEnv(DirectRLEnv):
             + 0.5 * angular_velocity_score
             + 0.5 * torch.exp(-angle.square() / 0.25)
             + imitation_weight * 0.1 * torch.exp(-qvel / 10)
-            + 1.5 * gripper_score
-            + 0.6 * torch.exp(-ge.square() / 0.01 - gv.square() / 0.0625)
-            + 0.3 * forearm_orientation
+            + flip_weight
+            * (
+                1.5 * gripper_score
+                + 0.6 * torch.exp(-ge.square() / 0.01 - gv.square() / 0.0625)
+                + 0.3 * forearm_orientation
+            )
             + contact
             + 0.3 * actual
             - 0.02 * smooth
@@ -761,6 +797,8 @@ class TrackerEnv(DirectRLEnv):
         self.assumed_prerequisite[env_ids] = self.starts[env_ids] >= self.approach_barrier
         self.gate_latched[env_ids] = self.assumed_prerequisite[env_ids]
         self.gate_allowed[env_ids] = self.assumed_prerequisite[env_ids]
+        if self.balance_only:
+            self.gate_allowed[env_ids] = True
         i = self.starts[env_ids]
         pose = torch.cat(
             [self.ref["root_pos"][i] + self.scene.env_origins[env_ids], self.ref["root_quat"][i]],

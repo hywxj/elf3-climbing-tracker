@@ -1,8 +1,8 @@
 {
   "date": "2026-11-18",
-  "scope": "Historical checks retained; training_design_revision is the current acceptance status",
+  "scope": "Historical checks retained; ground_balance_zero_payload is the current standing-only result. No flip, full climb or deployment acceptance.",
   "offline_tests": {
-    "passed": 51,
+    "passed": 54,
     "failed": 0,
     "skipped": 0
   },
@@ -706,5 +706,167 @@
       "initial_balance_std": 0.009999999776482582,
       "precision_cap_applied": true
     }
+  },
+  "ground_balance_zero_payload": {
+    "status": "PASS_FIXED_SCENE_5_SECONDS",
+    "gripper_added_mass_kg": 0.0,
+    "physical_gripper_mass_kg_deferred": 0.5,
+    "gripper_collision_envelope_retained": true,
+    "flip_required": false,
+    "standing_reference": "Source frame 0 in memory, foot-supporting ground only; original stand segment is post-climb",
+    "runtime_mass_and_fk": {
+      "status": "PASS",
+      "scope": "Reset-only FK and loaded inertial parameters, not dynamics acceptance",
+      "frames": [
+        {
+          "reference_frame": 0,
+          "site_error_max_m": 4.8977976803143974e-06,
+          "gripper_center_error_m": 1.687426159396325e-06,
+          "gripper_orientation_error_rad": 2.7939785130397494e-07
+        }
+      ],
+      "gripper_inertials": {
+        "configured_added_mass_kg": 0.0,
+        "baseline_total_mass_kg": 37.870686575227914,
+        "mujoco_total_mass_kg": 37.870686575227914,
+        "physx_total_mass_kg": 37.8706865478307,
+        "mujoco_added_total_mass_kg": 0.0,
+        "mujoco_wrist_mass_kg": 0.106560860250811,
+        "physx_wrist_mass_min_kg": 0.10656087100505829,
+        "physx_wrist_mass_max_kg": 0.10656087100505829,
+        "wrist_mass_error_kg": 1.0754247284361362e-08,
+        "wrist_com_error_m": 6.859353393114235e-10,
+        "wrist_inertia_error_kg_m2": 5.369312115012298e-12,
+        "physx_wrist_inertia_in_link_kg_m2": [
+          [
+            7.119999645510688e-05,
+            0.0,
+            2.561999463068787e-05
+          ],
+          [
+            0.0,
+            8.68499992066063e-05,
+            0.0
+          ],
+          [
+            2.562000008765608e-05,
+            0.0,
+            7.067999831633642e-05
+          ]
+        ],
+        "mujoco_wrist_inertia_in_link_kg_m2": [
+          [
+            7.119999999999997e-05,
+            0.0,
+            2.5619999999999985e-05
+          ],
+          [
+            0.0,
+            8.685e-05,
+            0.0
+          ],
+          [
+            2.561999999999999e-05,
+            0.0,
+            7.068e-05
+          ]
+        ],
+        "status": "PASS"
+      }
+    },
+    "first_trial": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_zero_payload_01",
+      "status": "FAIL",
+      "result": {
+        "requested_iterations": 300,
+        "ppo_iterations": 300,
+        "evaluated_iterations": 300,
+        "checkpoint_source": "latest.pt",
+        "partial_block_updates": "none",
+        "stop_reason": "iteration_budget",
+        "changed_actor_parameter_tensors": 8,
+        "best_iteration": 180,
+        "training_environment_steps": 7372800,
+        "curriculum": {
+          "phase": 0.0,
+          "window": 128,
+          "threshold": 0.8,
+          "step": 0.025,
+          "window_completed": 0,
+          "window_success_rate": 0.0,
+          "episodes": 0,
+          "promotions": []
+        },
+        "from_start_success_before": 0.0,
+        "from_start_success_after": 0.0,
+        "tail_success_before": 0.0,
+        "tail_success_after": 0.0,
+        "reward_stage": "prior",
+        "full_climb": "NOT RUN",
+        "qualified_for_deployment": false
+      },
+      "note": "Fixed 3e-4 learning rate and short-probe-driven exploration annealing; best at 180, then regression. Not the current profile."
+    },
+    "adaptive_trial": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_zero_payload_adaptive_01",
+      "result": {
+        "requested_iterations": 200,
+        "ppo_iterations": 200,
+        "evaluated_iterations": 200,
+        "checkpoint_source": "latest.pt",
+        "partial_block_updates": "none",
+        "stop_reason": "iteration_budget",
+        "changed_actor_parameter_tensors": 8,
+        "best_iteration": 200,
+        "training_environment_steps": 4915200,
+        "curriculum": {
+          "phase": 0.0,
+          "window": 128,
+          "threshold": 0.8,
+          "step": 0.025,
+          "window_completed": 0,
+          "window_success_rate": 0.0,
+          "episodes": 0,
+          "promotions": []
+        },
+        "from_start_success_before": 0.0,
+        "from_start_success_after": 1.0,
+        "tail_success_before": 0.0,
+        "tail_success_after": 1.0,
+        "reward_stage": "prior",
+        "full_climb": "NOT RUN",
+        "qualified_for_deployment": false
+      },
+      "warm_start": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_zero_payload_01/best.pt",
+      "changes": "KL-adaptive learning rate; standing exploration anneals only on full 5 s completion; explicit starting std 0.04",
+      "training_sampling_success_final_block": 0.0,
+      "evaluation_success_final_block": 1.0
+    },
+    "independent_process_evaluation": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_zero_payload_eval_01",
+      "checkpoint": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_zero_payload_adaptive_01/best.pt",
+      "start_phase": 0.0,
+      "required_hold_steps": 250,
+      "required_hold_s": 5.0,
+      "completed_episodes": 32,
+      "successes": 32,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb",
+      "max_across_episodes": {
+        "root_error_max_m": 0.06707790493965149,
+        "terminal_orientation_error_rad": 0.23386545479297638,
+        "terminal_root_speed_m_s": 0.03660986199975014,
+        "terminal_root_angular_speed_rad_s": 0.13303475081920624,
+        "gripper_error_max_rad": 0.0028771627694368362
+      }
+    },
+    "limits": [
+      "Same fixed initial state, not 32 independent randomized conditions",
+      "Exploratory training rollouts did not pass; robustness unvalidated",
+      "Fresh training with the final adaptive profile from iteration 0 has not been run; successful weights used the recorded warm start",
+      "Gripper flip, approach, climb, payload adaptation and deployment NOT RUN"
+    ],
+    "next_step": "View the learned standing checkpoint. Future flip transfer needs task-command and normalizer distribution handling; do not assume direct transfer."
   }
 }

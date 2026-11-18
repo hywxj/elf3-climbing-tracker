@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 import mujoco
@@ -34,11 +35,36 @@ class CompositeInertia(unittest.TestCase):
 
 @unittest.skipUnless(DEFAULT_SOURCE.exists(), "Runtime required")
 class LoadedGripper(unittest.TestCase):
-    def test_adds_half_kg_only_once_and_preserves_fk(self):
+    def test_zero_payload_preserves_inertials_and_collision_envelope(self):
         cfg = specification()
-        self.assertEqual(cfg["mass_kg"], 0.5)
+        self.assertEqual(cfg["mass_kg"], 0.0)
+        self.assertEqual(cfg["physical_mass_kg"], 0.5)
         _, source = load(DEFAULT_SOURCE)
         with tempfile.TemporaryDirectory() as folder:
+            baseline = mujoco.MjModel.from_xml_path(str(model_file(folder, source, True, False)))
+            model = mujoco.MjModel.from_xml_path(str(model_file(folder, source, True, True)))
+            np.testing.assert_array_equal(model.body_mass, baseline.body_mass)
+            np.testing.assert_array_equal(model.body_ipos, baseline.body_ipos)
+            np.testing.assert_array_equal(model.body_inertia, baseline.body_inertia)
+            self.assertEqual(model.ngeom, baseline.ngeom + 1)
+            self.assertEqual(model.geom(cfg["geom_name"]).contype[0], 1)
+
+    def test_adds_half_kg_only_once_and_preserves_fk(self):
+        cfg = specification()
+        # Retain regression coverage for the later payload adaptation stage.
+        cfg["mass_kg"] = 0.5
+        from scipy.spatial.transform import Rotation
+
+        rotation = Rotation.from_quat(cfg["mount_quaternion_wxyz"], scalar_first=True).as_matrix()
+        squared = (np.array(cfg["dimensions_mm"]) / 1000) ** 2
+        cfg["inertia_about_com_in_wrist_kg_m2"] = (
+            rotation @ np.diag(0.5 / 12 * (squared.sum() - squared)) @ rotation.T
+        ).tolist()
+        _, source = load(DEFAULT_SOURCE)
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch("elf3_climbing.gripper.specification", return_value=cfg),
+        ):
             baseline = mujoco.MjModel.from_xml_path(str(model_file(folder, source, True, False)))
             path = model_file(folder, source, True, True)
             model = mujoco.MjModel.from_xml_path(str(path))
