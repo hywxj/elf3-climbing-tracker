@@ -4,6 +4,7 @@ import hashlib
 import argparse
 import sys
 import json
+import math
 from pathlib import Path
 
 from .paths import DEFAULT_PACK, OUTPUT
@@ -16,7 +17,7 @@ def parser(settings=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, help="TOML settings; CLI options override [run]")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--mode", choices=["smoke", "train", "evaluate"], default="smoke")
+    p.add_argument("--mode", choices=["smoke", "train", "evaluate", "play"], default="smoke")
     p.add_argument("--reference", type=Path, default=DEFAULT_PACK)
     p.add_argument("--segment", choices=["flip", "stand", "prepare"], default="flip")
     p.add_argument("--num-envs", type=int, default=4)
@@ -24,6 +25,9 @@ def parser(settings=None):
     p.add_argument("--iterations", type=int, default=100)
     p.add_argument("--reward-stage", choices=["prior", "refine"], default="prior")
     p.add_argument("--checkpoint", type=Path)
+    p.add_argument("--play-episodes", type=int, default=0, help="play: 0 loops until window closes")
+    p.add_argument("--play-speed", type=float, default=1.0, help="play: 0.5 is half speed")
+    p.add_argument("--view", choices=["rear-left", "front", "left", "right"], default="rear-left")
     p.add_argument("--no-curriculum", action="store_true")
     p.add_argument("--no-pose-init", action="store_true")
     p.add_argument(
@@ -49,8 +53,19 @@ def main():
         p.error("--output is required")
     if args.num_envs < 1 or args.steps < 1 or args.iterations < 1:
         p.error("Counts must be positive")
-    if (args.mode == "evaluate" or args.reward_stage == "refine") and args.checkpoint is None:
-        p.error("Evaluation and reward refinement require an explicit checkpoint")
+    if (
+        args.mode in ("evaluate", "play") or args.reward_stage == "refine"
+    ) and args.checkpoint is None:
+        p.error("Evaluation, playback and reward refinement require an explicit checkpoint")
+    if args.mode == "play" and (
+        args.num_envs != 1
+        or args.play_episodes < 0
+        or not math.isfinite(args.play_speed)
+        or args.play_speed <= 0
+    ):
+        p.error(
+            "play requires --num-envs 1, nonnegative --play-episodes and positive finite --play-speed"
+        )
     output = args.output.expanduser().resolve()
     if output.exists():
         p.error("Choose a new output directory")
@@ -158,7 +173,11 @@ def main():
                 runner.alg.policy.actor[-1].bias.copy_(
                     (env.ref["joint_pos"][env.segment_end] - env.nominal[0]) / cfg.action_scale
                 )
-        if args.mode in ("train", "evaluate"):
+        if args.mode == "play":
+            from .playback import play
+
+            play(runner, wrapped, app, args, output)
+        elif args.mode in ("train", "evaluate"):
             from .evaluation import evaluate
 
             if args.mode == "evaluate":
