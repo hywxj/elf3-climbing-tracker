@@ -126,3 +126,90 @@ def check_model_frames(env):
         "frames": records,
         "gripper_inertials": inertial_check,
     }
+
+
+def audit_balance_model(env):
+    """Probe nonzero joint perturbations and all rigid-body inertials without stepping physics."""
+    import tempfile
+    import numpy as np
+    import mujoco
+    import torch
+    from scipy.spatial.transform import Rotation
+    from .model import load, model_file
+
+    _, source = load(env.reference_manifest["source"])
+    names = env.reference_np["joint_names"].tolist()
+    body_names = env.robot.body_names
+    frame = env.segment_start + round(0.9 * (env.segment_end - env.segment_start))
+    old_phase = env.evaluation_start_phase
+    saved_q = env.ref["joint_pos"][frame].clone()
+    q = saved_q.cpu().numpy().copy()
+    limits = env.limits[0].cpu().numpy()
+    records = []
+    try:
+        env.evaluation_start_phase = 0.9
+        with tempfile.TemporaryDirectory() as folder:
+            model = mujoco.MjModel.from_xml_path(str(model_file(folder, source, True)))
+            data = mujoco.MjData(model)
+            joint_ids = [model.jnt_qposadr[model.joint(n).id] for n in names]
+            body_ids = [model.body(n).id for n in body_names]
+            masses = env.robot.root_physx_view.get_masses()[0].cpu().numpy()
+            com = env.robot.data.body_com_pos_b[0].cpu().numpy()
+            inertias = (
+                env.robot.root_physx_view.get_inertias()[0]
+                .cpu()
+                .numpy()
+                .reshape(-1, 3, 3)
+                .transpose(0, 2, 1)
+            )
+            expected_inertia = []
+            for body in body_ids:
+                rotation = Rotation.from_quat(model.body_iquat[body], scalar_first=True).as_matrix()
+                expected_inertia.append(rotation @ np.diag(model.body_inertia[body]) @ rotation.T)
+            mass_error = abs(masses - model.body_mass[body_ids])
+            com_error = np.linalg.norm(com - model.body_ipos[body_ids], axis=-1)
+            inertia_error = np.max(abs(inertias - np.asarray(expected_inertia)), axis=(1, 2))
+            for scale in [0.0, 0.05, -0.05]:
+                tested = np.clip(q + scale * np.cos(np.arange(len(q))), limits[:, 0], limits[:, 1])
+                env.ref["joint_pos"][frame] = torch.as_tensor(tested, device=env.device)
+                env.reset()
+                data.qpos[:3] = env.reference_np["root_pos"][frame]
+                data.qpos[3:7] = env.reference_np["root_quat"][frame]
+                data.qpos[joint_ids] = tested
+                mujoco.mj_forward(model, data)
+                actual_p = (
+                    (env.robot.data.body_link_pos_w[0] - env.scene.env_origins[0]).cpu().numpy()
+                )
+                actual_q = env.robot.data.body_link_quat_w[0].cpu().numpy()
+                error_p = np.linalg.norm(actual_p - data.xpos[body_ids], axis=-1)
+                error_q = (
+                    Rotation.from_quat(actual_q, scalar_first=True)
+                    * Rotation.from_matrix(data.xmat[body_ids].reshape(-1, 3, 3)).inv()
+                ).magnitude()
+                records.append(
+                    {
+                        "perturbation_scale_rad": scale,
+                        "max_position_error_m": float(error_p.max()),
+                        "max_orientation_error_rad": float(error_q.max()),
+                        "worst_position_body": body_names[int(error_p.argmax())],
+                    }
+                )
+            return {
+                "scope": "All-body inertials and perturbed FK; no contact/drive equivalence or closed-loop success claim",
+                "frames": records,
+                "body_names": body_names,
+                "mass_error_kg": mass_error.tolist(),
+                "com_error_m": com_error.tolist(),
+                "inertia_error_kg_m2": inertia_error.tolist(),
+                "status": "PASS"
+                if max(x["max_position_error_m"] for x in records) < 0.002
+                and max(x["max_orientation_error_rad"] for x in records) < 0.01
+                and mass_error.max() < 1e-5
+                and com_error.max() < 1e-5
+                and inertia_error.max() < 1e-6
+                else "FAIL",
+            }
+    finally:
+        env.ref["joint_pos"][frame] = saved_q
+        env.evaluation_start_phase = old_phase
+        env.reset()

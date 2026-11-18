@@ -3,9 +3,12 @@
 import torch
 
 
-def evaluate(runner, wrapped, start_phase=0.0):
+def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
     env = wrapped.env
     old = (env.training_mode, env.use_curriculum, env.evaluation_start_phase, env.cfg.random_start)
+    original_hold_steps = env.cfg.end_hold_steps
+    if hold_steps is not None:
+        env.cfg.end_hold_steps = hold_steps
     env.training_mode = False
     env.use_curriculum = False
     env.evaluation_start_phase = start_phase
@@ -15,6 +18,7 @@ def evaluate(runner, wrapped, start_phase=0.0):
     episodes = []
     peak_root = torch.zeros(env.num_envs, device=env.device)
     peak_grip = torch.zeros_like(peak_root)
+    peak_hold = torch.zeros_like(peak_root)
     gate_ever = torch.zeros_like(active)
     try:
         with torch.inference_mode():
@@ -26,6 +30,9 @@ def evaluate(runner, wrapped, start_phase=0.0):
                 m = env.last_metrics
                 peak_root[active] = torch.maximum(peak_root[active], m["root_error_m"][active])
                 peak_grip[active] = torch.maximum(peak_grip[active], m["gripper_error_rad"][active])
+                peak_hold[active] = torch.maximum(
+                    peak_hold[active], m["stable_hold_steps"][active].float()
+                )
                 gate_ever[active] |= m["gate_allowed"][active]
                 finished = active & done.bool()
                 for k in finished.nonzero().flatten().tolist():
@@ -33,6 +40,7 @@ def evaluate(runner, wrapped, start_phase=0.0):
                         {
                             "environment": k,
                             "steps": step + 1,
+                            "max_stable_hold_s": float(peak_hold[k]) * env.step_dt,
                             "success": bool(m["success"][k]),
                             "terminal_root_velocity_error_m_s": float(
                                 m["root_velocity_error_m_s"][k]
@@ -67,6 +75,12 @@ def evaluate(runner, wrapped, start_phase=0.0):
                             "gripper_collision": bool(m["gripper_collision"][k]),
                             "lost_flip": bool(m["lost_flip"][k]),
                             "unexpected_contact": bool(m["failure_forbidden_contact"][k]),
+                            "terminal_forbidden_body_forces_N": {
+                                env.contacts.body_names[body]: float(force)
+                                for body, force in zip(
+                                    env.forbidden_sensor_ids, m["forbidden_body_force_N"][k]
+                                )
+                            },
                         }
                     )
                 active[finished] = False
@@ -75,6 +89,8 @@ def evaluate(runner, wrapped, start_phase=0.0):
         count = sum(e["success"] for e in episodes)
         return {
             "start_phase": start_phase,
+            "required_hold_steps": env.cfg.end_hold_steps,
+            "required_hold_s": env.cfg.end_hold_steps * env.step_dt,
             "completed_episodes": len(episodes),
             "successes": count,
             "success_fraction": count / max(1, env.num_envs),
@@ -83,6 +99,7 @@ def evaluate(runner, wrapped, start_phase=0.0):
             "episodes": episodes,
         }
     finally:
+        env.cfg.end_hold_steps = original_hold_steps
         env.training_mode, env.use_curriculum, env.evaluation_start_phase, env.cfg.random_start = (
             old
         )

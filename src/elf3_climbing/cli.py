@@ -25,8 +25,9 @@ def parser(settings=None):
     p.add_argument("--iterations", type=int, default=100)
     p.add_argument("--eval-interval", type=int, default=20)
     p.add_argument("--early-stop-patience", type=int, default=3)
+    p.add_argument("--failure-warmup-iterations", type=int, default=200)
     p.add_argument("--wrist-noise-std", type=float, default=0.005)
-    p.add_argument("--balance-noise-std", type=float, default=0.01)
+    p.add_argument("--balance-noise-std", type=float, default=0.08)
     p.add_argument("--reward-stage", choices=["prior", "refine"], default="prior")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--play-episodes", type=int, default=0, help="play: 0 loops until window closes")
@@ -53,11 +54,19 @@ def main():
     p = parser(settings)
     AppLauncher.add_app_launcher_args(p)
     args = p.parse_args()
+    args.balance_noise_explicit = any(
+        a == "--balance-noise-std" or a.startswith("--balance-noise-std=") for a in sys.argv[1:]
+    )
     if args.output is None:
         p.error("--output is required")
     if (
         min(
-            args.num_envs, args.steps, args.iterations, args.eval_interval, args.early_stop_patience
+            args.num_envs,
+            args.steps,
+            args.iterations,
+            args.eval_interval,
+            args.early_stop_patience,
+            args.failure_warmup_iterations,
         )
         < 1
     ):

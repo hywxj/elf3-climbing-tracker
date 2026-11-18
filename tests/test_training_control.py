@@ -4,6 +4,8 @@ from pathlib import Path
 from unittest.mock import Mock
 from elf3_climbing.training_control import (
     EvaluationGuard,
+    BalanceExploration,
+    initial_balance_std,
     finalize_checkpoint,
     save_checkpoint_atomically,
 )
@@ -30,6 +32,66 @@ class GuardTests(unittest.TestCase):
         self.assertIsNone(guard.inspect(0, 0, 0.8, 0, 0))
         self.assertIsNone(guard.inspect(0, 1, 0.8, 1, 1))
         self.assertEqual(guard.bad_streak, 0)
+
+    def test_measured_hold_progress_defers_stall_but_not_forever(self):
+        guard = EvaluationGuard(patience=2, min_iterations_before_stall=200)
+        for step, progress in [(200, 1.0), (220, 1.04), (240, 1.11), (260, 1.12)]:
+            self.assertIsNone(
+                guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=step, progress=progress)
+            )
+        self.assertEqual(
+            guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=280, progress=1.12),
+            "no_task_success",
+        )
+
+    def test_hold_progress_does_not_hide_regression_of_accepted_skill(self):
+        guard = EvaluationGuard(patience=2, best_tail=1)
+        self.assertIsNone(guard.inspect(0, 0, 0.8, 0, 0, progress=1.0))
+        self.assertEqual(guard.inspect(0, 0, 0.8, 0, 0, progress=2.0), "evaluation_regression")
+
+
+class ExplorationTests(unittest.TestCase):
+    def test_warm_start_preserves_precision_and_explicit_overrides(self):
+        self.assertEqual(initial_balance_std(0.08, None, 1), 0.08)
+        self.assertEqual(initial_balance_std(0.08, 0.08, 0), 0.08)
+        self.assertEqual(initial_balance_std(0.08, 0.08, 1), 0.02)
+        self.assertEqual(initial_balance_std(0.08, 0.01, 1), 0.01)
+        self.assertEqual(initial_balance_std(0.08, 0.08, 1, explicit=True), 0.08)
+
+    def test_no_success_does_not_shrink_exploration(self):
+        schedule = BalanceExploration()
+        for _ in range(10):
+            self.assertFalse(schedule.observe(0.9, 0.0, 0.0))
+        self.assertEqual(schedule.std, 0.08)
+
+    def test_repeated_mean_success_reduces_noise_until_floor(self):
+        schedule = BalanceExploration()
+        for expected in [0.04, 0.02, 0.01]:
+            self.assertFalse(schedule.observe(0.9, 1.0, 0.0))
+            self.assertTrue(schedule.observe(0.9, 1.0, 0.0))
+            self.assertEqual(schedule.std, expected)
+        self.assertFalse(schedule.observe(0.9, 1.0, 0.0))
+        self.assertFalse(schedule.observe(0.9, 1.0, 0.0))
+
+    def test_phase_change_requires_fresh_evidence(self):
+        schedule = BalanceExploration()
+        schedule.observe(0.9, 1.0, 0.0)
+        self.assertFalse(schedule.observe(0.875, 1.0, 0.0))
+        self.assertEqual(schedule.std, 0.08)
+
+    def test_warmup_delays_no_success_stop_but_not_regression(self):
+        guard = EvaluationGuard(patience=2, min_iterations_before_stall=200)
+        for step in [20, 40, 60, 180]:
+            self.assertIsNone(guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=step))
+        self.assertIsNone(guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=200))
+        self.assertEqual(
+            guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=220), "no_task_success"
+        )
+        guard = EvaluationGuard(patience=2, best_tail=1, min_iterations_before_stall=200)
+        self.assertIsNone(guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=20))
+        self.assertEqual(
+            guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=40), "evaluation_regression"
+        )
 
 
 class CheckpointTests(unittest.TestCase):

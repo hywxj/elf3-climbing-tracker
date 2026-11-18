@@ -2,7 +2,7 @@
   "date": "2026-11-18",
   "scope": "Historical checks retained; training_design_revision is the current acceptance status",
   "offline_tests": {
-    "passed": 42,
+    "passed": 51,
     "failed": 0,
     "skipped": 0
   },
@@ -494,5 +494,217 @@
     "ppo_updates": 0,
     "convergence": "NOT RUN",
     "scope": "Allows nonzero small velocity tracking errors; not an absolute speed cap or evidence that previous balance failure is solved"
+  },
+  "failure_diagnosis_v10": {
+    "source_run": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_v9_20261118_175616",
+    "source_training_result": {
+      "requested_iterations": 3000,
+      "ppo_iterations": 60,
+      "evaluated_iterations": 60,
+      "checkpoint_source": "latest.pt",
+      "partial_block_updates": "none",
+      "stop_reason": "no_task_success",
+      "changed_actor_parameter_tensors": 8,
+      "best_iteration": 60,
+      "training_environment_steps": 2949120,
+      "curriculum": {
+        "phase": 0.9,
+        "window": 128,
+        "threshold": 0.8,
+        "step": 0.025,
+        "window_completed": 128,
+        "window_success_rate": 0.0,
+        "episodes": 58924,
+        "promotions": []
+      },
+      "from_start_success_before": 0.0,
+      "from_start_success_after": 0.0,
+      "tail_success_before": 0.0,
+      "tail_success_after": 0.0,
+      "reward_stage": "prior",
+      "full_climb": "NOT RUN",
+      "qualified_for_deployment": false
+    },
+    "diagnostic_trace": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_failure_trace_01/balance_trace.json",
+    "failed_policy_trace": {
+      "duration_s": 0.96,
+      "terminal_root_velocity_m_s": [
+        1.2323418855667114,
+        0.324175626039505,
+        -0.5900208353996277
+      ],
+      "left_wrist_net_contact_force_N": 461.52868241951165
+    },
+    "model_audit": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_model_audit_01/model_audit.json",
+      "status": "PASS",
+      "max_fk_position_error_m": 5.066421777350257e-07,
+      "max_fk_orientation_error_rad": 8.167805343758976e-07,
+      "max_mass_error_kg": 2.899169917469635e-07,
+      "max_com_error_m": 6.69804673791541e-09,
+      "max_inertia_error_kg_m2": 1.1679267377068085e-07,
+      "scope": "All-body inertials and perturbed FK; no contact/drive equivalence or closed-loop success claim"
+    },
+    "independent_long_hold": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_learned_hold5_01/balance_trace.json",
+      "required_hold_s": 5,
+      "terminated_at_s": 2.2800000000000002,
+      "success": false,
+      "status": "FAIL"
+    },
+    "trials": {
+      "balance_exploration_probe_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_exploration_probe_01",
+        "last_assessed_iterations": 200,
+        "status": "COMPLETED",
+        "result": {
+          "requested_iterations": 200,
+          "ppo_iterations": 200,
+          "evaluated_iterations": 200,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 120,
+          "training_environment_steps": 4915200,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 63168,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 1.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        },
+        "evaluation_history_file": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_exploration_probe_01/evaluation_history.jsonl"
+      },
+      "balance_adaptive_hold5_probe_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_adaptive_hold5_probe_01",
+        "last_assessed_iterations": 120,
+        "status": "INTERRUPTED_BY_ASSISTANT",
+        "reason": "Stopped diagnostic retaining high exploration; preserved assessed checkpoints, moved to explicit lower-noise controlled trial. Native SIGINT bypassed Python cleanup; no completion marker or fabricated training result.",
+        "evaluation_history_file": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_adaptive_hold5_probe_01/evaluation_history.jsonl"
+      },
+      "balance_precision_hold5_probe_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_precision_hold5_probe_01",
+        "last_assessed_iterations": 60,
+        "status": "INTERRUPTED_BY_ASSISTANT",
+        "reason": "Stopped diagnostic retaining high exploration; preserved assessed checkpoints, moved to explicit lower-noise controlled trial. Native SIGINT bypassed Python cleanup; no completion marker or fabricated training result.",
+        "evaluation_history_file": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_precision_hold5_probe_01/evaluation_history.jsonl"
+      },
+      "balance_low_noise_hold5_probe_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_low_noise_hold5_probe_01",
+        "last_assessed_iterations": 200,
+        "status": "COMPLETED",
+        "result": {
+          "requested_iterations": 200,
+          "ppo_iterations": 200,
+          "evaluated_iterations": 200,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 120,
+          "training_environment_steps": 4915200,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 45253,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        },
+        "evaluation_history_file": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_low_noise_hold5_probe_01/evaluation_history.jsonl"
+      }
+    },
+    "protocol": "precision_tracking_v10",
+    "reward_coefficients_changed": false,
+    "changes": [
+      "separate wrist angle loss and collision without changing failure union",
+      "record forbidden-body contact forces and maximum stable hold duration",
+      "flip terminal hold 5 s, 1 s probe only for exploration scheduling",
+      "balance exploration 0.08 -> 0.04 -> 0.02 -> 0.01 on two good short probes",
+      "no-success guard starts counting at 200 iterations, meaningful hold-duration gains reset stall counter, skill regression remains guarded",
+      "verified short warm starts cap balance noise at 0.02 unless CLI override"
+    ],
+    "scope": "Bounded diagnostic learning, not full climbing or deployment validation; wider exploration and extra iterations are confounded in the first probe",
+    "tests_passed": 51,
+    "full_climb": "NOT RUN",
+    "real_lidar": "NOT CONNECTED",
+    "final_acceptance": {
+      "status": "FAIL",
+      "from_start_successes": 0,
+      "tail_successes": 0,
+      "episodes_per_evaluation": 512,
+      "required_hold_s": 5.0,
+      "short_probe_successes": 511,
+      "short_probe_hold_s": 1.0,
+      "best_iteration": 120,
+      "best_tail_mean_max_stable_hold_s": 2.019062499999996,
+      "formal_training_recommended": false
+    },
+    "preservation": {
+      "protected_original_files_checked": 76,
+      "changed": [],
+      "runtime_verified_files": 47
+    },
+    "final_interface": {
+      "completion": {
+        "status": "COMPLETED",
+        "mode": "train",
+        "scope": "Execution complete; inspect evaluation for task success"
+      },
+      "result": {
+        "requested_iterations": 1,
+        "ppo_iterations": 1,
+        "evaluated_iterations": 1,
+        "checkpoint_source": "latest.pt",
+        "partial_block_updates": "none",
+        "stop_reason": "iteration_budget",
+        "changed_actor_parameter_tensors": 8,
+        "best_iteration": 0,
+        "training_environment_steps": 96,
+        "curriculum": {
+          "phase": 0.9,
+          "window": 128,
+          "threshold": 0.8,
+          "step": 0.025,
+          "window_completed": 0,
+          "window_success_rate": 0.0,
+          "episodes": 0,
+          "promotions": []
+        },
+        "from_start_success_before": 0.0,
+        "from_start_success_after": 0.0,
+        "tail_success_before": 0.0,
+        "tail_success_after": 0.0,
+        "reward_stage": "prior",
+        "full_climb": "NOT RUN",
+        "qualified_for_deployment": false
+      },
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/balance_v10_interface_01",
+      "scope": "Two-environment one-iteration software integration check; not a convergence test",
+      "initial_balance_std": 0.009999999776482582,
+      "precision_cap_applied": true
+    }
   }
 }

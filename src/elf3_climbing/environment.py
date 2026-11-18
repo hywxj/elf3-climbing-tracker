@@ -27,6 +27,7 @@ from .protocol import (
     velocity_tracking_errors,
     held_velocity_target,
     tolerant_velocity_reward,
+    flip_retention_failures,
 )
 
 PROPRIO_SIZE = 93  # angular velocity + gravity + q + qdot + previous action
@@ -82,6 +83,7 @@ class TrackerCfg(DirectRLEnvCfg):
     curriculum_enabled: bool = False
     reward_stage: str = "prior"
     end_hold_steps: int = 50
+    flip_hold_steps: int = 250
     extra_budget_steps: int = 100
     curriculum_step: float = 0.025
     linear_velocity_reward_tolerance: float = 0.05  # m/s error, not absolute speed
@@ -117,6 +119,9 @@ class TrackerEnv(DirectRLEnv):
         if cfg.segment not in segments:
             raise ValueError("Only flip/stand/prepare tracking experiments are enabled")
         self.segment_start, self.segment_end = segments[cfg.segment]
+        if cfg.segment == "flip":
+            cfg.end_hold_steps = cfg.flip_hold_steps
+            cfg.extra_budget_steps = max(cfg.extra_budget_steps, cfg.end_hold_steps + 50)
         cfg.episode_length_s = (
             self.segment_end - self.segment_start + 1 + cfg.extra_budget_steps
         ) * 0.02
@@ -515,12 +520,10 @@ class TrackerEnv(DirectRLEnv):
         )
         self.ref_steps += (~blocked).long()
         i, pos, angle, qerr = self._measure()
-        forbidden = (
-            torch.linalg.vector_norm(
-                self.contacts.data.net_forces_w[:, self.forbidden_sensor_ids], dim=-1
-            ).amax(-1)
-            > 100.0
+        forbidden_force = torch.linalg.vector_norm(
+            self.contacts.data.net_forces_w[:, self.forbidden_sensor_ids], dim=-1
         )
+        forbidden = forbidden_force.amax(-1) > 100.0
         local_root = d.root_link_pos_w - self.scene.env_origins
         feet = self.site_positions()[:, :2] - self.scene.env_origins[:, None, :]
         premature, foot_advance = premature_step(
@@ -531,8 +534,7 @@ class TrackerEnv(DirectRLEnv):
             self.starts < self.approach_barrier,
             self.rules,
         )
-        collision = clearance < -self.rules.penetration_tolerance
-        lost_flip = self.gate_latched & ~self.gate_allowed
+        lost_flip, collision = flip_retention_failures(ge, clearance, self.gate_latched, self.rules)
         failure = (
             (pos > 0.45)
             | (angle > 1.1)
@@ -605,6 +607,8 @@ class TrackerEnv(DirectRLEnv):
         self.failed += int((done & ~success).sum())
         self.successful += int(success.sum())
         self.last_metrics = {
+            "forbidden_body_force_N": forbidden_force.detach().clone(),
+            "stable_hold_steps": self.end_settle.detach().clone(),
             "root_velocity_error_m_s": velocity_error.detach().clone(),
             "root_angular_velocity_error_rad_s": angular_velocity_error.detach().clone(),
             "root_speed_m_s": root_speed.detach().clone(),

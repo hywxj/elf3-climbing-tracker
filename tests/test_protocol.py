@@ -191,5 +191,32 @@ class TolerantVelocityRewardTests(unittest.TestCase):
         self.assertEqual(float(tolerant_velocity_reward(error, 0.05)), 1.0)
 
 
+class RetentionFailureTests(unittest.TestCase):
+    def test_collision_is_not_misreported_as_lost_wrist_angle(self):
+        from elf3_climbing.protocol import flip_retention_failures
+
+        lost, collision = flip_retention_failures(
+            torch.tensor([0.014]), torch.tensor([-0.003]), torch.tensor([True]), GripperRules()
+        )
+        self.assertFalse(lost.item())
+        self.assertTrue(collision.item())
+
+    def test_failure_union_matches_old_logic(self):
+        from elf3_climbing.protocol import flip_retention_failures
+
+        r = GripperRules()
+        errors, gaps, latched = torch.meshgrid(
+            torch.tensor([-0.3, -0.18, 0.0, 0.18, 0.3]),
+            torch.tensor([-0.01, -0.001, 0.0, 0.02]),
+            torch.tensor([0.0, 1.0]),
+            indexing="ij",
+        )
+        latched = latched.bool()
+        maintained = (errors.abs() <= r.retain_angle_tolerance) & (gaps >= -r.penetration_tolerance)
+        previous = (latched & ~maintained) | (gaps < -r.penetration_tolerance)
+        lost, collision = flip_retention_failures(errors, gaps, latched, r)
+        torch.testing.assert_close(lost | collision, previous)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ RUN_FIELDS = {
     "no_pose_init",
     "eval_interval",
     "early_stop_patience",
+    "failure_warmup_iterations",
     "wrist_noise_std",
     "balance_noise_std",
 }
@@ -29,7 +30,14 @@ def load_settings(path=None):
     run, ppo = data.get("run", {}), data.get("ppo", {})
     if set(run) - RUN_FIELDS:
         raise ValueError(f"Unknown run settings: {set(run) - RUN_FIELDS}")
-    for key in ("num_envs", "iterations", "steps", "eval_interval", "early_stop_patience"):
+    for key in (
+        "num_envs",
+        "iterations",
+        "steps",
+        "eval_interval",
+        "early_stop_patience",
+        "failure_warmup_iterations",
+    ):
         if key in run and (type(run[key]) is not int or run[key] < 1):
             raise ValueError(f"{key} must be a positive integer")
     for key, choices in {

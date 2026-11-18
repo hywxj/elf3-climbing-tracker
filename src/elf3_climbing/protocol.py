@@ -144,3 +144,10 @@ def tolerant_velocity_reward(error, tolerance):
     """Equal reward throughout the small-error band, smooth decay beyond it."""
     excess = (error - tolerance).clamp(min=0)
     return torch.exp(-excess.square() / 0.25)
+
+
+def flip_retention_failures(angle_error, clearance, latched, rules):
+    """Separate loss of wrist angle from a gripper collision; retain the same failure union."""
+    lost_angle = latched & (angle_error.abs() > rules.retain_angle_tolerance)
+    collision = clearance < -rules.penetration_tolerance
+    return lost_angle, collision

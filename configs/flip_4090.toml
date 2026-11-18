@@ -6,8 +6,9 @@ num_envs = 128
 iterations = 200
 eval_interval = 20
 early_stop_patience = 3
+failure_warmup_iterations = 200
 wrist_noise_std = 0.005
-balance_noise_std = 0.01
+balance_noise_std = 0.08
 seed = 42
 
 [ppo]
