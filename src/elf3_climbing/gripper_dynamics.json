@@ -1,0 +1,7 @@
+{
+  "mass_kg": 0.5,
+  "mass_source": "User-provided gripper mass, 2026-11-18",
+  "center_of_mass_model": "collision_envelope_center",
+  "inertia_model": "uniform_collision_envelope_box",
+  "assumptions": "Only mass is user-provided. Center of mass and inertia are approximations from the existing padded box. No additional adapter mass is assumed."
+}

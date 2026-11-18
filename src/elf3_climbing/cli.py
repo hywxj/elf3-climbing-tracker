@@ -106,7 +106,8 @@ def main():
         (output / "fk_calibration.json").write_text(json.dumps(calibration, indent=2))
         provenance = {
             str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in Path(__file__).parent.glob("*.py")
+            for p in Path(__file__).parent.iterdir()
+            if p.suffix in (".py", ".json")
         }
         asset = Path(cfg.robot_cfg.spawn.usd_path)
         provenance.update(
@@ -122,6 +123,7 @@ def main():
             dim=-1,
         )
         mapping = {
+            "gripper_dynamics": env.gripper_mass_report,
             "joint_names": env.reference_np["joint_names"].tolist(),
             "isaac_joint_indices": env.joint_ids,
             "initial_site_fk_max_error_m": float(fk_error.max()),
@@ -164,6 +166,10 @@ def main():
                     "Checkpoint observation schema mismatch; implicit padding is forbidden"
                 )
             runner.load(str(args.checkpoint), load_optimizer=False)
+            print(
+                "CHECKPOINT_NOTE: current gripper mass is included; older checkpoints may have been trained without it. Evaluate under the current model.",
+                flush=True,
+            )
         elif args.mode == "train" and not args.no_pose_init:
             # A fixed final-pose action bias helps the backward curriculum start.
             # No per-frame reference is added to policy actions.
@@ -196,7 +202,7 @@ def main():
                     "segment": args.segment,
                     "height_source": "ground_truth_boxes",
                     "real_lidar": "NOT CONNECTED",
-                    "gripper_mass": "NOT CALIBRATED",
+                    "gripper_dynamics": env.gripper_mass_report,
                     "reward_stage": args.reward_stage,
                     "gripper_rules": asdict(env.rules),
                     "curriculum": env.curriculum.state(),

@@ -80,5 +80,71 @@
   },
   "corrected_rewards_ppo_trial": "NOT RUN",
   "rtx4090_execution": "NOT RUN",
-  "full_climb": "NOT RUN"
+  "full_climb": "NOT RUN",
+  "gripper_mass_update": {
+    "date": "2026-11-18",
+    "mass_kg": 0.5,
+    "mass_source": "user",
+    "com_and_inertia": "uniform collision envelope approximation",
+    "tests_passed": 27,
+    "new_training_updates": 0,
+    "protected_original_files_unchanged": 76,
+    "inertial_validation": {
+      "configured_added_mass_kg": 0.5,
+      "baseline_total_mass_kg": 37.870686575227914,
+      "mujoco_total_mass_kg": 38.370686575227914,
+      "physx_total_mass_kg": 38.37068656273186,
+      "mujoco_added_total_mass_kg": 0.5,
+      "mujoco_wrist_mass_kg": 0.606560860250811,
+      "physx_wrist_mass_min_kg": 0.6065608859062195,
+      "physx_wrist_mass_max_kg": 0.6065608859062195,
+      "wrist_mass_error_kg": 2.565540846433123e-08,
+      "wrist_com_error_m": 2.9020571036590005e-09,
+      "wrist_inertia_error_kg_m2": 1.1513023130335642e-10,
+      "physx_wrist_inertia_in_link_kg_m2": [
+        [
+          0.001055319095030427,
+          1.2363468755716145e-11,
+          0.00015154312131926417
+        ],
+        [
+          1.2363468755716145e-11,
+          0.0024714695755392313,
+          -1.7329573106378282e-12
+        ],
+        [
+          0.00015154309221543372,
+          -1.7329573106378282e-12,
+          0.0029899305664002895
+        ]
+      ],
+      "mujoco_wrist_inertia_in_link_kg_m2": [
+        [
+          0.0010553190929382058,
+          0.0,
+          0.0001515431305288367
+        ],
+        [
+          0.0,
+          0.002471469544208264,
+          0.0
+        ],
+        [
+          0.00015154313052883673,
+          0.0,
+          0.0029899304512700582
+        ]
+      ],
+      "status": "PASS"
+    },
+    "checkpoint_800_with_mass_evaluation": {
+      "start_phase": 0.0,
+      "completed_episodes": 16,
+      "successes": 16,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb"
+    },
+    "rtx4090_execution": "NOT RUN"
+  }
 }

@@ -15,6 +15,9 @@ elf3-tracker = "elf3_climbing.launch:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+elf3_climbing = ["*.json"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

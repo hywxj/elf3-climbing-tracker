@@ -16,7 +16,7 @@ from isaaclab.utils.math import quat_apply, quat_apply_inverse, yaw_quat
 from .robot_cfg import ELF3LITE_CFG
 from .reference import read_pack
 from .paths import DEFAULT_PACK, URDF
-from .gripper import specification
+from .gripper import specification, apply_usd_mass
 from .protocol import (
     GripperRules,
     advance_gate,
@@ -194,8 +194,8 @@ class TrackerEnv(DirectRLEnv):
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
-        # Attach a collision-only shape to the existing rigid link. The source
-        # asset is never edited; gripper mass/inertia remain explicitly unknown.
+        # Attach collision geometry and combine explicit inertials on the spawned
+        # wrist only. Source USD files remain unchanged.
         from pxr import UsdPhysics
 
         stage = self.sim.stage
@@ -220,6 +220,7 @@ class TrackerEnv(DirectRLEnv):
             translation=tuple(gripper["center_in_wrist_m"]),
             orientation=tuple(gripper["mount_quaternion_wxyz"]),
         )
+        self.gripper_mass_report = apply_usd_mass(matches[0])
         ground = sim_utils.GroundPlaneCfg(physics_material=self.cfg.sim.physics_material)
         ground.func("/World/ground", ground)
         for i, (pos, quat, size) in enumerate(
