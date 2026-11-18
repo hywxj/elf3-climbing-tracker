@@ -2,14 +2,15 @@
 [run]
 segment = "flip"
 flat_ground = true
+wrist_only = true
 no_curriculum = true
 reward_stage = "prior"
 num_envs = 512
-iterations = 1000
+iterations = 200
 eval_interval = 20
 early_stop_patience = 3
-failure_warmup_iterations = 1000
-wrist_noise_std = 0.02
+failure_warmup_iterations = 200
+wrist_noise_std = 0.005
 balance_noise_std = 0.02
 seed = 42
 

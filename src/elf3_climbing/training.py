@@ -27,14 +27,24 @@ def suite(runner, wrapped, phase):
     return {"from_start": start, "tail": tail, "current": current, "short_probe": probe}
 
 
-def score(results):
-    return (
+def score(results, track_flip=False):
+    quality = (
         results["from_start"]["success_fraction"],
         results["tail"]["success_fraction"],
         sum(x["max_stable_hold_s"] for x in results["from_start"]["episodes"])
         / max(1, len(results["from_start"]["episodes"])),
         sum(x["max_stable_hold_s"] for x in results["tail"]["episodes"])
         / max(1, len(results["tail"]["episodes"])),
+    )
+    episodes = results["from_start"]["episodes"]
+    if track_flip:
+        # Failed motion never outranks equally unsuccessful but surviving motion
+        # solely by reaching a wrist angle during a fall.
+        quality += (
+            sum(not x["terminated"] for x in episodes) / max(1, len(episodes)),
+            -sum(x["terminal_gripper_error_rad"] for x in episodes) / max(1, len(episodes)),
+        )
+    return quality + (
         -sum(
             x["terminal_root_velocity_error_m_s"] / 0.25
             + x["terminal_root_angular_velocity_error_rad_s"] / 0.5
@@ -46,6 +56,13 @@ def score(results):
 
 def train(runner, wrapped, args, output):
     env = wrapped.env
+    wrist_only = args.wrist_only
+    if wrist_only:
+        from .transfer import preserve_standing_feedback
+
+        runner.standing_preservation_hooks = preserve_standing_feedback(
+            runner.alg.policy, runner.obs_normalizer, env.wrist_joint
+        )
     balance_indices = [
         j
         for j, name in enumerate(env.reference_np["joint_names"].tolist())
@@ -67,11 +84,20 @@ def train(runner, wrapped, args, output):
                 runner.alg.policy.log_std[j] = math.log(args.balance_noise_std)
             elif "wrist" in name:
                 runner.alg.policy.log_std[j] = math.log(args.wrist_noise_std)
+        if wrist_only:
+            runner.alg.policy.log_std.fill_(math.log(0.001))
+            runner.alg.policy.log_std[env.wrist_joint] = math.log(args.wrist_noise_std)
     runner.alg.policy.log_std.requires_grad_(False)
     runner.current_learning_iteration = 0  # --checkpoint is an explicit warm start, not resume
     contract = {
         "protocol": "ground_balance_v1" if env.balance_only else "precision_tracking_v10",
         "task": env.task_report,
+        "transfer": getattr(env, "transfer_report", None),
+        "wrist_only": wrist_only,
+        "standing_feedback": "actor hidden layers, other output rows and actor normalizer frozen"
+        if wrist_only
+        else "joint optimization",
+        "checkpoint_selection": "full success, continuous hold, then survival and wrist error for flip, then velocity error",
         "reward_version": "tolerant_reference_velocity_v9",
         "reference": str(args.reference),
         "segment": args.segment,
@@ -97,7 +123,9 @@ def train(runner, wrapped, args, output):
             "learned_variance": False,
             "wrist_fixed": True,
             "balance_schedule": (
-                "halve after two full 5 s evaluations >=90% if sampled success <80%"
+                "fixed 0.001 rad outside left wrist; no balance annealing in wrist-only stage"
+                if wrist_only
+                else "halve after two full 5 s evaluations >=90% if sampled success <80%"
                 if env.balance_only
                 else "halve after two matching-phase 1 s probes >=90% if sampled full-hold success <80%; promotion still requires full hold"
             ),
@@ -128,11 +156,15 @@ def train(runner, wrapped, args, output):
         "scope": "Short-segment trial, not full ACP or accepted climb",
     }
     before = suite(runner, wrapped, env.curriculum.phase)
-    exploration.std = initial_balance_std(
-        args.balance_noise_std,
-        restored_balance_std,
-        before["current" if env.balance_only else "short_probe"]["success_fraction"],
-        args.balance_noise_explicit,
+    exploration.std = (
+        0.001
+        if wrist_only
+        else initial_balance_std(
+            args.balance_noise_std,
+            restored_balance_std,
+            before["current" if env.balance_only else "short_probe"]["success_fraction"],
+            args.balance_noise_explicit,
+        )
     )
     exploration.minimum = min(exploration.minimum, exploration.std)
     with torch.no_grad():
@@ -141,7 +173,7 @@ def train(runner, wrapped, args, output):
     contract["exploration"]["requested_balance_std"] = args.balance_noise_std
     contract["exploration"]["effective_initial_balance_std"] = exploration.std
     contract["exploration"]["warm_start_precision_cap_applied"] = (
-        exploration.std < args.balance_noise_std
+        not wrist_only and exploration.std < args.balance_noise_std
     )
     contract["exploration"]["joint_std_by_name"] = dict(
         zip(
@@ -151,7 +183,8 @@ def train(runner, wrapped, args, output):
     )
     (output / "training_contract.json").write_text(json.dumps(contract, indent=2))
     (output / "evaluation_before.json").write_text(json.dumps(before, indent=2))
-    best_score = score(before)
+    track_flip = args.segment == "flip"
+    best_score = score(before, track_flip)
     best_iteration = 0
     runner.logger_type = "tensorboard"
     save_checkpoint_atomically(
@@ -164,6 +197,7 @@ def train(runner, wrapped, args, output):
         best_tail=before["tail"]["success_fraction"],
     )
     before_weights = [p.detach().clone() for p in runner.alg.policy.actor.parameters()]
+    before_actor_norm = {k: v.clone() for k, v in runner.obs_normalizer.state_dict().items()}
     completed = 0
     stop_reason = "iteration_budget"
     results = before
@@ -203,16 +237,20 @@ def train(runner, wrapped, args, output):
                 completed_iterations=completed,
                 progress=hold_progress,
             )
-            annealed = not reason and exploration.observe(
-                phase,
-                phase_rate if env.balance_only else results["short_probe"]["success_fraction"],
-                training_rate,
+            annealed = (
+                not wrist_only
+                and not reason
+                and exploration.observe(
+                    phase,
+                    phase_rate if env.balance_only else results["short_probe"]["success_fraction"],
+                    training_rate,
+                )
             )
             if annealed:
                 with torch.no_grad():
                     runner.alg.policy.log_std[balance_indices] = math.log(exploration.std)
                 env.curriculum.samples.clear()  # New sampling distribution needs a fresh window.
-            improved = score(results) > best_score
+            improved = score(results, track_flip) > best_score
             info = {
                 "completed_iterations": completed,
                 "curriculum": env.curriculum.state(),
@@ -220,7 +258,7 @@ def train(runner, wrapped, args, output):
                 "contract": contract,
             }
             if improved:
-                best_score = score(results)
+                best_score = score(results, track_flip)
                 best_iteration = completed
                 save_checkpoint_atomically(runner, output / "best.pt", infos=info)
             save_checkpoint_atomically(runner, output / "latest.pt", infos=info)
@@ -236,6 +274,10 @@ def train(runner, wrapped, args, output):
                 "phase": phase,
                 "training_success_fraction": training_rate,
                 "mean_max_stable_hold_s": hold_progress,
+                "mean_terminal_gripper_error_rad": sum(
+                    e["terminal_gripper_error_rad"] for e in results["from_start"]["episodes"]
+                )
+                / max(1, len(results["from_start"]["episodes"])),
                 "balance_noise_std_used": balance_std_used,
                 "next_balance_noise_std": exploration.std,
                 "exploration_annealed": bool(annealed),
@@ -277,6 +319,21 @@ def train(runner, wrapped, args, output):
     updated = sum(
         not torch.equal(a, b) for a, b in zip(before_weights, runner.alg.policy.actor.parameters())
     )
+    standing_preserved = None
+    if wrist_only:
+        after_weights = list(runner.alg.policy.actor.parameters())
+        body_rows = [j for j in range(29) if j != env.wrist_joint]
+        standing_preserved = (
+            all(torch.equal(a, b) for a, b in zip(before_weights[:-2], after_weights[:-2]))
+            and torch.equal(before_weights[-2][body_rows], after_weights[-2][body_rows])
+            and torch.equal(before_weights[-1][body_rows], after_weights[-1][body_rows])
+            and all(
+                torch.equal(v, runner.obs_normalizer.state_dict()[k])
+                for k, v in before_actor_norm.items()
+            )
+        )
+        if not standing_preserved:
+            raise RuntimeError("Standing feedback changed during wrist-only training")
     assessed = finalize_checkpoint(
         runner, output, evaluated_iterations, contract, interrupted=stop_reason == "interrupted"
     )
@@ -290,6 +347,7 @@ def train(runner, wrapped, args, output):
         "partial_block_updates": "unknown, excluded" if stop_reason == "interrupted" else "none",
         "stop_reason": stop_reason,
         "changed_actor_parameter_tensors": updated,
+        "standing_feedback_preserved": standing_preserved,
         "best_iteration": best_iteration,
         "training_environment_steps": completed * runner.num_steps_per_env * env.num_envs,
         "curriculum": env.curriculum.state(),

@@ -35,6 +35,11 @@ def parser(settings=None):
     p.add_argument("--view", choices=["rear-left", "front", "left", "right"], default="rear-left")
     p.add_argument("--no-curriculum", action="store_true")
     p.add_argument("--flat-ground", action="store_true")
+    p.add_argument(
+        "--wrist-only",
+        action="store_true",
+        help="Preserve standing actor feedback; train wrist output only",
+    )
     p.add_argument("--no-pose-init", action="store_true")
     p.add_argument(
         "--output", type=Path, help="Required: a new directory under ELF3_RUNTIME_ROOT/runs"
@@ -55,6 +60,10 @@ def main():
     p = parser(settings)
     AppLauncher.add_app_launcher_args(p)
     args = p.parse_args()
+    if args.wrist_only and (
+        args.segment != "flip" or not args.flat_ground or args.checkpoint is None
+    ):
+        p.error("--wrist-only requires flat-ground flip and a checkpoint")
     args.balance_noise_explicit = any(
         a == "--balance-noise-std" or a.startswith("--balance-noise-std=") for a in sys.argv[1:]
     )
@@ -209,9 +218,21 @@ def main():
                     runner.obs_normalizer,
                     runner.privileged_obs_normalizer,
                     env.wrist_joint,
-                    (env.ref["joint_pos"][0, env.wrist_joint] - env.nominal[0, env.wrist_joint])
+                    (
+                        env.ref["joint_pos"][env.segment_end, env.wrist_joint]
+                        - env.nominal[0, env.wrist_joint]
+                    )
                     / cfg.action_scale,
                 )
+                transfer.update(
+                    reference_frame=env.segment_end,
+                    reference_wrist_angle_rad=float(
+                        env.ref["joint_pos"][env.segment_end, env.wrist_joint]
+                    ),
+                    reset_wrist_angle_rad=float(env.ref["joint_pos"][0, env.wrist_joint]),
+                    target_rate_limit_rad_s=float(env.target_rates[env.wrist_joint]),
+                )
+                env.transfer_report = transfer
                 (output / "standing_transfer.json").write_text(json.dumps(transfer, indent=2))
             print(
                 f"CHECKPOINT_NOTE: configured gripper added mass is {env.gripper_mass_report['added_mass_kg']} kg; evaluate under this current model.",

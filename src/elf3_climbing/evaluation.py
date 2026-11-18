@@ -20,9 +20,11 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
     peak_grip = torch.zeros_like(peak_root)
     peak_hold = torch.zeros_like(peak_root)
     gate_ever = torch.zeros_like(active)
+    first_gate_time = torch.full_like(peak_root, float("nan"))
     try:
         with torch.inference_mode():
             wrapped.obs, _ = env.reset()
+            initial_wrist = env.robot.data.joint_pos[:, env.joint_ids[env.wrist_joint]].clone()
             for step in range(env.max_episode_length + 2):
                 obs = runner.obs_normalizer(wrapped.obs["policy"])
                 actions = runner.alg.policy.act_inference(obs)
@@ -33,6 +35,8 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
                 peak_hold[active] = torch.maximum(
                     peak_hold[active], m["stable_hold_steps"][active].float()
                 )
+                newly_ready = active & m["gate_allowed"] & ~gate_ever
+                first_gate_time[newly_ready] = (step + 1) * env.step_dt
                 gate_ever[active] |= m["gate_allowed"][active]
                 finished = active & done.bool()
                 for k in finished.nonzero().flatten().tolist():
@@ -40,6 +44,11 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
                         {
                             "environment": k,
                             "steps": step + 1,
+                            "initial_gripper_angle_rad": float(initial_wrist[k]),
+                            "terminal_gripper_angle_rad": float(m["joint_pos"][k, env.wrist_joint]),
+                            "first_gate_ready_s": float(first_gate_time[k])
+                            if torch.isfinite(first_gate_time[k])
+                            else None,
                             "max_stable_hold_s": float(peak_hold[k]) * env.step_dt,
                             "success": bool(m["success"][k]),
                             "terminal_root_velocity_error_m_s": float(

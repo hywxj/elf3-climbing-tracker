@@ -73,16 +73,29 @@ PYTHONPATH=src:third_party/rsl_rl python -u run.py --mode play \
   --output "$ELF3_RUNTIME_ROOT/runs/balance_view_$(date +%Y%m%d_%H%M%S)"
 ```
 
-### 历史翻转诊断配置（当前先不运行）
+### 站稳后的下一阶段：参考初始化的夹爪翻转
 
 已能站立后，使用 `configs/flip_from_balance.toml`，配合
 `--checkpoint "$ELF3_RUNTIME_ROOT/runs/balance_zero_payload_adaptive_01/best.pt"`。
-此配置为 512 环境、最多 1000 轮、每 20 轮评估；平地、附加质量 0 kg、从第 0 帧开始、不启用倒序课程，不接近高台。
+此配置为 512 环境、最多 200 轮、每 20 轮评估；平地、附加质量 0 kg、从第 0 帧开始、不启用倒序课程，不接近高台。
 加载 balance 权重时会自动初始化此前恒定的夹爪任务输入、腕部历史输入及被屏蔽的腕输出，
-保留其他网络参数，并写入 `standing_transfer.json`。这是一种热启动，不能保证翻转过程中持续平衡。
+腕部输出以参考第 73 帧约 −1.309 rad 初始化，而物理 reset 仍是第 0 帧的 0 rad；目标按已有 1.5 rad/s 限制渐变。运行中不写 qpos、不逐帧注入参考角度。`standing_transfer.json` 明确记录此初始化，训练前成功不能算成 PPO 从零学习的成果。
+当前 `wrist_only=true`：只更新左腕输出行和 critic；站立 actor 的隐藏层、其余输出行、actor 归一化参数保持不变。腰腿仍执行已有的实时站立反馈，**不固定身体关节**。腰腿等其他动作的采样标准差固定 0.001 rad，左腕 0.005 rad。本阶段腕输出依赖已有特征，尚不是全身技能联合训练；后续解冻全身需要单独的技能保持约束。
+`best.pt` 优先按完整完成率和连续保持选择；未完成时进一步比较存活率和腕角误差，再比较速度，避免优先选中完全不翻腕的站姿。
 不要用普通 `--segment flip --checkpoint <balance权重>` 绕过该配置。
-初始迁移的两环境检查维持到回合上限 7.46 秒，未摔倒或触发碰撞；翻转尚未学会。
-小规模一轮 PPO 启动检查已完成，正式翻转收敛未验证。播放此阶段权重也应使用该配置，以保持平地场景一致。
+历史 v1 只给腕输出 0 rad 初值，在用户运行到约 420 轮时翻转仍几乎没有进展；v2 改为参考末态初始化。单独保留初始化、开放全身更新的试验又出现站立退化，因此不推荐沿用该试验的 latest.pt。最新实验结果及初始化/训练的区别见 `validation.json`。播放此阶段权重也应使用该配置，以保持平地场景一致。
+
+当前复测：`flip_wrist_stage_01` 的 40 轮专项 PPO 后，末块带小幅动作噪声的 1024/1024 个训练回合完成任务，确定性评估 512/512；独立进程加载 `best.pt` 后 32/32 完成翻转并连续站稳 5 秒（`flip_wrist_stage_eval_01`）。只有腕输出的两组参数张量更新，站立反馈及 actor 归一化逐项不变。**参考末态初始化在 PPO 之前已能完成任务**，这些结果不能表述为从零训练学会；随机扰动与全身微调尚未验证。60 项自动测试通过。
+
+```bash
+PYTHONPATH=src:third_party/rsl_rl python -u run.py \
+  --config configs/flip_from_balance.toml --mode play --num-envs 1 \
+  --device cuda:0 --view rear-left \
+  --checkpoint "$ELF3_RUNTIME_ROOT/runs/flip_wrist_stage_01/best.pt" \
+  --output "$ELF3_RUNTIME_ROOT/runs/flip_view_$(date +%Y%m%d_%H%M%S)"
+```
+
+### 历史翻转诊断配置（当前先不运行）
 
 ```bash
 python -u run.py --config configs/flip_4090.toml --mode train \

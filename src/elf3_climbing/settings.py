@@ -12,6 +12,7 @@ RUN_FIELDS = {
     "seed",
     "no_curriculum",
     "flat_ground",
+    "wrist_only",
     "no_pose_init",
     "eval_interval",
     "early_stop_patience",
@@ -47,7 +48,7 @@ def load_settings(path=None):
     }.items():
         if key in run and run[key] not in choices:
             raise ValueError(f"Invalid {key}")
-    for key in ("no_curriculum", "no_pose_init", "flat_ground"):
+    for key in ("no_curriculum", "no_pose_init", "flat_ground", "wrist_only"):
         if key in run and type(run[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
     if "wrist_noise_std" in run and not 0 < run["wrist_noise_std"] <= 0.02:

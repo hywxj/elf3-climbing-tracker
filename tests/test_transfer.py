@@ -4,10 +4,39 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 
-from elf3_climbing.transfer import standing_to_flip
+from elf3_climbing.transfer import standing_to_flip, preserve_standing_feedback
 
 
 class StandingTransfer(unittest.TestCase):
+    def test_wrist_updates_preserve_body_feedback_and_normalization(self):
+        from rsl_rl.modules.normalizer import EmpiricalNormalization
+
+        torch.manual_seed(7)
+        actor = nn.Sequential(nn.Linear(12, 16), nn.ELU(), nn.Linear(16, 29))
+        policy = SimpleNamespace(actor=actor)
+        normalizer = EmpiricalNormalization(12)
+        samples = torch.randn(32, 12)
+        normalizer(samples)
+        old_stats = {k: v.clone() for k, v in normalizer.state_dict().items()}
+        before = actor(normalizer(samples)).detach().clone()
+        # Capture after this final statistics update, then freeze for training.
+        old_stats = {k: v.clone() for k, v in normalizer.state_dict().items()}
+        handles = preserve_standing_feedback(policy, normalizer, 20)
+        optimizer = torch.optim.Adam(actor.parameters(), lr=0.01)
+        for _ in range(5):
+            optimizer.zero_grad()
+            actor(normalizer(samples)).sum().backward()
+            optimizer.step()
+        normalizer(samples * 100)
+        after = actor(normalizer(samples)).detach()
+        body = [i for i in range(29) if i != 20]
+        torch.testing.assert_close(after[:, body], before[:, body], rtol=0, atol=0)
+        self.assertFalse(torch.equal(after[:, 20], before[:, 20]))
+        for k, value in normalizer.state_dict().items():
+            torch.testing.assert_close(value, old_stats[k], rtol=0, atol=0)
+        for handle in handles:
+            handle.remove()
+
     def test_other_outputs_preserved_at_old_channel_means_and_new_inputs_are_bounded(self):
         torch.manual_seed(13)
         policy = SimpleNamespace(
@@ -28,11 +57,11 @@ class StandingTransfer(unittest.TestCase):
         before = policy.actor((raw - norms[0]._mean) / (norms[0]._std + 0.01)).detach()
         remaining = [i for i in range(632) if i not in columns]
         old_means = norms[0]._mean.clone()
-        standing_to_flip(policy, *norms, wrist, 0.0)
+        standing_to_flip(policy, *norms, wrist, -1.309)
         raw[:, columns] = -1.309
         after = policy.actor((raw - norms[0]._mean) / (norms[0]._std + 0.01)).detach()
         body = [i for i in range(29) if i != wrist]
         torch.testing.assert_close(after[:, body], before[:, body])
-        torch.testing.assert_close(after[:, wrist], torch.zeros(4))
+        torch.testing.assert_close(after[:, wrist], torch.full((4,), -1.309))
         torch.testing.assert_close(norms[0]._mean[:, remaining], old_means[:, remaining])
         self.assertTrue(torch.isfinite(after).all())

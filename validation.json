@@ -1,8 +1,8 @@
 {
   "date": "2026-11-18",
-  "scope": "Historical checks retained; ground_balance_zero_payload is the current standing-only result. No flip, full climb or deployment acceptance.",
+  "scope": "Historical checks retained; wrist_flip_stage_v2 is the current fixed-scene standing-plus-flip result. No full climb or deployment acceptance.",
   "offline_tests": {
-    "passed": 54,
+    "passed": 60,
     "failed": 0,
     "skipped": 0
   },
@@ -868,5 +868,213 @@
       "Gripper flip, approach, climb, payload adaptation and deployment NOT RUN"
     ],
     "next_step": "View the learned standing checkpoint. Future flip transfer needs task-command and normalizer distribution handling; do not assume direct transfer."
+  },
+  "wrist_flip_stage_v2": {
+    "status": "PASS_FIXED_SCENE_REFERENCE_INITIALIZATION_AND_WRIST_REFINEMENT",
+    "physical_gripper_mass_added_kg": 0.0,
+    "reference": "50 Hz flip segment, l_wrist_y_joint: 0 rad at frame 0 to -1.30898 rad at frame 73",
+    "initialization": {
+      "method": "standing_to_flip_reference_seed_v2",
+      "actor_reinitialized_input_columns": [
+        26,
+        55,
+        84,
+        119,
+        148,
+        177,
+        212,
+        241,
+        270,
+        305,
+        334,
+        363,
+        398,
+        427,
+        456,
+        626,
+        627,
+        628,
+        629,
+        631
+      ],
+      "critic_reinitialized_input_columns": [
+        26,
+        55,
+        84,
+        119,
+        148,
+        177,
+        212,
+        241,
+        270,
+        305,
+        334,
+        363,
+        398,
+        427,
+        456,
+        626,
+        627,
+        628,
+        629,
+        631,
+        652,
+        681
+      ],
+      "wrist_output_bias": -1.3089799880981445,
+      "other_output_rows_preserved": true,
+      "scope": "Wrist goal seeded from reference, then PPO refinement. Any pre-PPO flip is initialization performance, not reward learning from scratch.",
+      "reference_frame": 73,
+      "reference_wrist_angle_rad": -1.3089799880981445,
+      "reset_wrist_angle_rad": 0.0,
+      "target_rate_limit_rad_s": 1.5
+    },
+    "ppo_scope": "Only left wrist output row and critic updated; actor body feedback and actor normalization preserved; body action sampling std 0.001, wrist std 0.005",
+    "full_actor_update_trial": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_reference_seed_01",
+      "result": {
+        "requested_iterations": 60,
+        "ppo_iterations": 60,
+        "evaluated_iterations": 60,
+        "checkpoint_source": "latest.pt",
+        "partial_block_updates": "none",
+        "stop_reason": "evaluation_regression",
+        "changed_actor_parameter_tensors": 8,
+        "best_iteration": 0,
+        "training_environment_steps": 1474560,
+        "curriculum": {
+          "phase": 0.0,
+          "window": 128,
+          "threshold": 0.8,
+          "step": 0.025,
+          "window_completed": 0,
+          "window_success_rate": 0.0,
+          "episodes": 0,
+          "promotions": []
+        },
+        "from_start_success_before": 1.0,
+        "from_start_success_after": 0.0,
+        "tail_success_before": 1.0,
+        "tail_success_after": 0.0,
+        "reward_stage": "prior",
+        "full_climb": "NOT RUN",
+        "qualified_for_deployment": false
+      },
+      "status": "FAIL_REGRESSION_AFTER_SUCCESSFUL_INITIALIZATION"
+    },
+    "wrist_only_trial": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_wrist_stage_01",
+      "result": {
+        "requested_iterations": 40,
+        "ppo_iterations": 40,
+        "evaluated_iterations": 40,
+        "checkpoint_source": "latest.pt",
+        "partial_block_updates": "none",
+        "stop_reason": "iteration_budget",
+        "changed_actor_parameter_tensors": 2,
+        "standing_feedback_preserved": true,
+        "best_iteration": 20,
+        "training_environment_steps": 983040,
+        "curriculum": {
+          "phase": 0.0,
+          "window": 128,
+          "threshold": 0.8,
+          "step": 0.025,
+          "window_completed": 0,
+          "window_success_rate": 0.0,
+          "episodes": 0,
+          "promotions": []
+        },
+        "from_start_success_before": 1.0,
+        "from_start_success_after": 1.0,
+        "tail_success_before": 1.0,
+        "tail_success_after": 1.0,
+        "reward_stage": "prior",
+        "full_climb": "NOT RUN",
+        "qualified_for_deployment": false
+      },
+      "last_block": {
+        "completed_iterations": 40,
+        "phase": 0.0,
+        "training_success_fraction": 1.0,
+        "mean_max_stable_hold_s": 5.0,
+        "mean_terminal_gripper_error_rad": 0.0009513245895504951,
+        "balance_noise_std_used": 0.001,
+        "next_balance_noise_std": 0.001,
+        "exploration_annealed": false,
+        "outcomes": {
+          "episodes": 1024,
+          "successes": 1024,
+          "timeout": 0,
+          "root_error": 0,
+          "orientation_error": 0,
+          "joint_error": 0,
+          "unexpected_contact": 0,
+          "premature_advance": 0,
+          "gripper_collision": 0,
+          "lost_flip": 0,
+          "premature_arm_contact": 0
+        },
+        "from_start_success_fraction": 1.0,
+        "tail_success_fraction": 1.0,
+        "current_phase_success_fraction": 1.0,
+        "short_probe_success_fraction": 1.0,
+        "promoted": false,
+        "next_phase": 0.0,
+        "stop_reason": null,
+        "best_iteration": 20
+      }
+    },
+    "independent_process_evaluation": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_wrist_stage_eval_01",
+      "checkpoint": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_wrist_stage_01/best.pt",
+      "start_phase": 0.0,
+      "required_hold_steps": 250,
+      "required_hold_s": 5.0,
+      "completed_episodes": 32,
+      "successes": 32,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb",
+      "metrics": {
+        "initial_gripper_angle_rad": {
+          "min": 0.0,
+          "max": 0.0,
+          "mean": 0.0
+        },
+        "terminal_gripper_angle_rad": {
+          "min": -1.3082630634307861,
+          "max": -1.3081865310668945,
+          "mean": -1.3082331642508507
+        },
+        "first_gate_ready_s": {
+          "min": 1.159999966621399,
+          "max": 1.159999966621399,
+          "mean": 1.159999966621399
+        },
+        "root_error_max_m": {
+          "min": 0.04215417429804802,
+          "max": 0.05479297786951065,
+          "mean": 0.046584379277192056
+        },
+        "terminal_gripper_error_rad": {
+          "min": 0.0007369518280029297,
+          "max": 0.0008134841918945312,
+          "mean": 0.000766851007938385
+        },
+        "terminal_root_speed_m_s": {
+          "min": 0.010760887525975704,
+          "max": 0.023760652169585228,
+          "mean": 0.018197531782789156
+        }
+      }
+    },
+    "limits": [
+      "Reference initialization already completed the flip before PPO; not learned from zero by reward search",
+      "Fixed initial states and low action noise, not randomized physical disturbances",
+      "Wrist output uses existing standing features; no full-body joint training in this stage",
+      "No approach, arm support, climb, payload adaptation or hardware deployment tested"
+    ],
+    "evidence": "Source parameters, code hashes, training_contract.json, standing_transfer.json, evaluation_before.json and evaluation_*.json in each run directory"
   }
 }
