@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "body": "l_wrist_z_link",
+  "geom_name": "left_gripper_envelope",
+  "gripper_length_mm": 153.0,
+  "gripper_open_width_mm": 125.0,
+  "gripper_thickness_mm": 60.5,
+  "adapter_axial_allowance_mm": 11.0,
+  "padding_each_face_mm": 5.0,
+  "mount_plane_position_mm": [50.0, 0.0, 0.0],
+  "mount_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+  "larger_finger_direction_in_mount_frame": [0.0, 1.0, 0.0],
+  "mount_assumption": "Envelope extends along left wrist local +X, from the current wrist STL's x=50mm end face. Local +Y is outboard in the robot neutral pose. This coarse mounting assumption is adjustable and not a measured flange transform.",
+  "shape_scope": "One box covering the pictured open/closed endpoint dimensions and full adapter allowance, plus padding. Finger asymmetry is enclosed rather than individually modeled.",
+  "collision_tolerance_mm": 1.0,
+  "analysis_scope": "Geometry only; original robot mass and inertia are unchanged."
+}

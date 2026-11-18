@@ -1,0 +1,43 @@
+{
+  "versions": {
+    "isaaclab": "0.54.4",
+    "isaacsim": "5.1.0.0",
+    "torch": "2.7.0+cu128",
+    "mujoco": "3.11.0",
+    "scipy": "1.15.3"
+  },
+  "isaaclab_commit": "b4c321024792976150ca55fddb26fa34480d974e",
+  "rsl_rl_version": "2.3.1",
+  "rsl_rl_sha256": {
+    "__init__.py": "dbe9ce32085757751f7dc5bc2c5a61befc2cc6db3fd0f49fe74268cfc4b28acc",
+    "algorithms/__init__.py": "0457c5aafae34a73e85b51c7358af3a783fe64b2b46fd145802c6d5f432366fe",
+    "algorithms/amp_ppo.py": "9b82438a8b323b00d81fd95bc4a695628cd61a286a907a6f771ae89013b34ed2",
+    "algorithms/distillation.py": "acbe4cd84339ffd9192a220a1d5830ebeec2e67dcc62a3fec008f14591301884",
+    "algorithms/ppo.py": "950a3c5886b21a523585bcb1ee2f23228c40aaaaf05e759d39e04eaf2b2400ab",
+    "env/__init__.py": "6d892c205aa0c61573c57047e1caea186d38fa75eed28e2dabbd6fa6818c2a12",
+    "env/vec_env.py": "87861ee3c030fee4bddd35150474de90a91d45eb767c4aaac0760db2d1713b00",
+    "modules/__init__.py": "0c3e50a4cb84b3aaf66ca0ccba7bc6b0025d43f1a165504013815d2cc1da19cd",
+    "modules/actor_critic.py": "e1edf83c569cddf5d60c0e40843dbc487eab252f67f76b99bd385b7dd5cba064",
+    "modules/actor_critic_recurrent.py": "6ffe0dd50d39253bcde8d25eab2ca4e7a581e9059a72cdee98e65c0f019f70c6",
+    "modules/discriminator.py": "047fe1b39215ad2fd716ea32f9c71c69f88c316b79a68e5ea9a2cd5514cab93f",
+    "modules/normalizer.py": "e6d61d3d260958f926917d1f37ec5ba40f51470f6410437b624551928e37473f",
+    "modules/rnd.py": "a5d4418eeace26236fab89beda59fc5c91c583f2d2650c477c550d0aee35fa59",
+    "modules/student_teacher.py": "0582fe81c645e3e8b4fff44a54ff575c8445d2e71ac418a800f13105211a52b8",
+    "modules/student_teacher_recurrent.py": "041175f097464ac9a2958ca026a1ab29ec7f742f12669fc0107b44b6693143f9",
+    "networks/__init__.py": "59185b8451e4412a26042400cf2d50a3780877418b540239f8c135e2563759a7",
+    "networks/memory.py": "f87931aefe1ddfc8fdf394b3c558a58340844cbe3ba364d5b18f2d1d3a96c895",
+    "runners/__init__.py": "d4fb77c2cf1583c75fc15111d49fc9d759a5b1811b45bd977f91c2435fc45fe8",
+    "runners/amp_on_policy_runner.py": "350ca5cb35eea2f09621d995436db1a9dcb25de8025395836e3148cc1bc8e52f",
+    "runners/on_policy_runner.py": "ab910558f03691739ee8648ab9f4b91ab9ef22a2fafd6c3cbf18f37814a4c296",
+    "storage/__init__.py": "bfa2aa03bef40899b246abe77a693d049440922c126699c09bd7aa7b7ec4925e",
+    "storage/replay_buffer.py": "f23623b3c6fbe02cab01fe754bf281c3b76f5acb4d2cc5dca63c0f0b63de8fd7",
+    "storage/rollout_storage.py": "3a66e1bbda5333e3c1e896cf7edc373998aadee1da5d11465f32edba2041c198",
+    "utils/__init__.py": "4a1e9ad5a54292da880a49490908a8fea56fb66704d0a6f5e044b1f2f1fedf70",
+    "utils/gmr_motion_loader.py": "544181dcbb4c0c8ef73f715556ce9aa0199fef167fe90722852178e736e4e9f6",
+    "utils/motion_loader.py": "91aad76096e6c56cb769bd32160fa97415a8b14a6b376b054f7836c0dfa559e5",
+    "utils/motion_loader_for_display.py": "e8a19d0a3a35ce07092429067affd1e47bab34f7da24d11b59211877242bff8c",
+    "utils/neptune_utils.py": "4d57144f9402a4dfedfbe71939b49b261bb66ec62ce6ada6a985a06709a8a9d0",
+    "utils/utils.py": "cadb34c7653819cbeb4af80a554878013c0963fd30e92d31c92a8904453892b9",
+    "utils/wandb_utils.py": "8824ca7437b4104ba168e7c0e8d052ddc4e636fb77203216f8cf561345286763"
+  }
+}

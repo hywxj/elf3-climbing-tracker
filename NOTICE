@@ -1,0 +1,6 @@
+RSL-RL: exact local TienKung-Lab rsl_rl snapshot (2.3.1), BSD-3-Clause.
+robot_cfg.py: active ELF3LITE_CFG extracted from local TienKung-Lab; only asset path changed.
+model.py: minimal local retarget_tools/view_motion.py loader and Hiking _robot_mesh_geometry helper; external project imports removed.
+Third-party copyright headers retained. See third_party/rsl_rl/LICENSE and THIRD_PARTY_LICENSE.txt.
+Source TienKung-Lab HEAD: 7f309a88c7fcc4e0b67a2d1731095111f85302ba; local working tree, not a claim of pristine upstream.
+Robot assets and source motions are transferred separately in the private runtime bundle.

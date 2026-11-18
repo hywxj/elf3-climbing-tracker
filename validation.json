@@ -1,0 +1,84 @@
+{
+  "date": "2026-11-18",
+  "scope": "Refactor and transfer checks, no new training",
+  "offline_tests": {
+    "passed": 23,
+    "failed": 0,
+    "skipped": 0
+  },
+  "ruff": "PASS",
+  "wheel_build": "PASS",
+  "runtime_checksums": {
+    "status": "PASS",
+    "files": 47
+  },
+  "relocation_test": "PASS",
+  "protected_original_files": {
+    "checked": 76,
+    "changed": []
+  },
+  "interface_smoke": {
+    "interface_smoke": "PASS",
+    "terrain_force_filter": "PASS_NONZERO_LOADED_FEET",
+    "controller": "zero",
+    "steps": 20,
+    "num_envs": 2,
+    "physical_episodes": 0,
+    "failed_episodes": 0,
+    "successful_short_episodes": 0,
+    "optimizer_updates": 0,
+    "short_segment_tracking": "FAIL",
+    "full_climb": "NOT RUN",
+    "real_lidar": "NOT CONNECTED",
+    "scope": "Physics advanced with PD joint targets; root/joints written only at reset. This is not a learned policy."
+  },
+  "fk_calibration": {
+    "status": "PASS",
+    "scope": "Reset-only FK, not dynamics",
+    "frames": [
+      {
+        "reference_frame": 0,
+        "site_error_max_m": 7.47438434700598e-07,
+        "gripper_center_error_m": 1.4523342444562487e-07,
+        "gripper_orientation_error_rad": 2.7939785130397494e-07
+      },
+      {
+        "reference_frame": 36,
+        "site_error_max_m": 7.47438434700598e-07,
+        "gripper_center_error_m": 1.2235366215801077e-07,
+        "gripper_orientation_error_rad": 3.819168674845654e-07
+      },
+      {
+        "reference_frame": 73,
+        "site_error_max_m": 8.683682608534582e-07,
+        "gripper_center_error_m": 1.8817842556898624e-07,
+        "gripper_orientation_error_rad": 7.041693699019043e-07
+      }
+    ]
+  },
+  "historical_pre_refactor_trial": {
+    "ppo_iterations": 200,
+    "changed_actor_parameter_tensors": 8,
+    "training_environment_steps": 153600,
+    "curriculum": {
+      "phase": 0.9,
+      "window": 128,
+      "threshold": 0.8,
+      "step": 0.1,
+      "window_completed": 128,
+      "window_success_rate": 0.0,
+      "episodes": 3898,
+      "promotions": []
+    },
+    "from_start_success_before": 0.0,
+    "from_start_success_after": 0.0,
+    "tail_success_before": 1.0,
+    "tail_success_after": 0.0,
+    "reward_stage": "prior",
+    "full_climb": "NOT RUN",
+    "qualified_for_deployment": false
+  },
+  "corrected_rewards_ppo_trial": "NOT RUN",
+  "rtx4090_execution": "NOT RUN",
+  "full_climb": "NOT RUN"
+}
