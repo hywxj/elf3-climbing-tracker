@@ -34,6 +34,22 @@ def evaluate(runner, wrapped, start_phase=0.0):
                             "environment": k,
                             "steps": step + 1,
                             "success": bool(m["success"][k]),
+                            "terminal_root_velocity_error_m_s": float(
+                                m["root_velocity_error_m_s"][k]
+                            ),
+                            "terminal_root_angular_velocity_error_rad_s": float(
+                                m["root_angular_velocity_error_rad_s"][k]
+                            ),
+                            "terminal_root_speed_m_s": float(m["root_speed_m_s"][k]),
+                            "terminal_root_angular_speed_rad_s": float(
+                                m["root_angular_speed_rad_s"][k]
+                            ),
+                            "terminated": bool(m["terminated"][k]),
+                            "timeout": bool(m["expired"][k] and not m["success"][k]),
+                            "failure_root": bool(m["failure_root"][k]),
+                            "failure_orientation": bool(m["failure_orientation"][k]),
+                            "failure_joint": bool(m["failure_joint"][k]),
+                            "terminal_gripper_speed_rad_s": float(m["gripper_speed_rad_s"][k]),
                             "reset_frame": int(m["reset_frame"][k]),
                             "terminal_reference_frame": int(m["reference_frame"][k]),
                             "assumed_prior_flip": bool(m["assumed_prerequisite"][k]),

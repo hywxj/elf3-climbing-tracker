@@ -68,18 +68,31 @@ class CurriculumTests(unittest.TestCase):
     def test_promotion_rejects_stale_easy_episodes(self):
         c = BackwardCurriculum(window=4)
         c.observe([True] * 4, [0.9] * 4)
+        c.promote(0.9, 1.0)
         self.assertEqual(c.phase, 0.8)
         c.observe([True] * 4, [0.9] * 4)
         self.assertEqual(c.phase, 0.8)
         self.assertEqual(len(c.samples), 0)
         c.observe([True] * 4, [0.8] * 4)
+        c.promote(0.8, 1.0)
         self.assertEqual(c.phase, 0.7)
+
+    def test_requires_matching_phase_evaluation(self):
+        c = BackwardCurriculum(window=4)
+        c.observe([True] * 4, [0.9] * 4)
+        self.assertEqual(c.phase, 0.9)
+        self.assertFalse(c.promote(0.8, 1.0))
+        self.assertFalse(c.promote(0.9, 0.5))
+        self.assertTrue(c.promote(0.9, 1.0))
+        self.assertEqual(c.phase, 0.8)
 
     def test_phase_has_floor(self):
         c = BackwardCurriculum(phase=0.1, window=2)
         c.observe([True, True], [0.1, 0.1])
+        c.promote(0.1, 1.0)
         self.assertEqual(c.phase, 0.0)
         c.observe([True, True], [0.0, 0.0])
+        c.promote(0.0, 1.0)
         self.assertEqual(c.phase, 0.0)
 
 
@@ -108,8 +121,43 @@ class TaskSemanticsTests(unittest.TestCase):
         from elf3_climbing.protocol import completion_bonus
 
         now = completion_bonus(torch.tensor([40]), 0.02)
-        later = completion_bonus(torch.tensor([0]), 0.02) + 6.0 * 40 * 0.02
+        later = completion_bonus(torch.tensor([0]), 0.02) + 9.8 * 40 * 0.02
         self.assertGreater(float(now), float(later))
+
+
+class VelocityTrackingTests(unittest.TestCase):
+    def test_forward_movement_and_turning_are_allowed(self):
+        from elf3_climbing.protocol import velocity_tracking_errors
+
+        linear = torch.tensor([[0.7, 0.0, 0.0]])
+        angular = torch.tensor([[0.0, 0.0, 0.8]])
+        le, ae = velocity_tracking_errors(linear, angular, linear, angular)
+        self.assertEqual(le.item(), 0.0)
+        self.assertEqual(ae.item(), 0.0)
+
+    def test_uncommanded_motion_has_error(self):
+        from elf3_climbing.protocol import velocity_tracking_errors
+
+        zero = torch.zeros(1, 3)
+        le, ae = velocity_tracking_errors(torch.tensor([[0.7, 0.0, 0.0]]), zero, zero, zero)
+        self.assertGreater(le.item(), 0.25)
+        self.assertEqual(ae.item(), 0.0)
+
+    def test_neighboring_small_curriculum_steps_do_not_mix_samples(self):
+        c = BackwardCurriculum(phase=0.875, step=0.025)
+        c.observe([True, False], [0.9, 0.875])
+        self.assertEqual(list(c.samples), [False])
+
+
+class HeldReferenceTests(unittest.TestCase):
+    def test_terminal_hold_zeros_velocity_without_stopping_motion_phase(self):
+        from elf3_climbing.protocol import held_velocity_target
+
+        reference = torch.tensor([[0.7, 0.0, 0.2], [0.025, -0.03, 0.01]])
+        target = held_velocity_target(reference, torch.tensor([False, True]))
+        torch.testing.assert_close(target[0], reference[0])
+        torch.testing.assert_close(target[1], torch.zeros(3))
+        self.assertNotEqual(float(reference[1, 0]), 0.0)
 
 
 if __name__ == "__main__":

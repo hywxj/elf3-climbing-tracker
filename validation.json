@@ -1,8 +1,8 @@
 {
   "date": "2026-11-18",
-  "scope": "Refactor and transfer checks, no new training",
+  "scope": "Historical checks retained; training_design_revision is the current acceptance status",
   "offline_tests": {
-    "passed": 23,
+    "passed": 39,
     "failed": 0,
     "skipped": 0
   },
@@ -78,7 +78,7 @@
     "full_climb": "NOT RUN",
     "qualified_for_deployment": false
   },
-  "corrected_rewards_ppo_trial": "NOT RUN",
+  "corrected_rewards_ppo_trial": "RUN; sustained balance FAIL; see training_design_revision",
   "rtx4090_execution": "NOT RUN",
   "full_climb": "NOT RUN",
   "gripper_mass_update": {
@@ -143,8 +143,328 @@
       "successes": 16,
       "success_fraction": 1.0,
       "unfinished": 0,
-      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb"
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb",
+      "acceptance_note": "Historical short criterion only. Superseded as stability evidence by current reassessment: 0/16."
     },
     "rtx4090_execution": "NOT RUN"
+  },
+  "training_design_revision": {
+    "date": "2026-11-18",
+    "protocol": "precision_tracking_v8",
+    "implementation_checks": "PASS",
+    "sustained_balance": "FAIL",
+    "formal_training_recommended": false,
+    "full_climb": "NOT RUN",
+    "real_lidar": "NOT CONNECTED",
+    "criteria": {
+      "linear_velocity_error_m_s": 0.25,
+      "angular_velocity_error_rad_s": 0.5,
+      "continuous_terminal_hold_s": 1.0,
+      "scope": "Completion gate only; reference velocity during motion, zero target in clamped terminal hold; not absolute speed cap or dynamics sufficiency proof"
+    },
+    "moving_reference_regression_test": {
+      "target_speed_m_s": 0.7,
+      "actual_speed_m_s": 0.7,
+      "velocity_error_m_s": 0.0,
+      "status": "PASS"
+    },
+    "old_800_reassessment": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v5_old800_stability/evaluation.json",
+      "successes": 0,
+      "completed_episodes": 16,
+      "criteria": "v5: added body speed check, 0.2 s hold; not v8 1 s hold",
+      "implication": "Historical 16/16 under earlier criteria is NOT proof of sustained balance"
+    },
+    "exploration_ablation": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_exploration_20261118/exploration.json",
+      "criteria": "Original short completion condition, before body-speed and 1 s hold checks",
+      "optimizer_updates": 0,
+      "cases": [
+        {
+          "action_std": 0.0,
+          "wrist_std": 0.0,
+          "episodes": 128,
+          "successes": 128
+        },
+        {
+          "action_std": 0.08,
+          "wrist_std": 0.03,
+          "episodes": 128,
+          "successes": 0
+        },
+        {
+          "action_std": 0.03,
+          "wrist_std": 0.01,
+          "episodes": 128,
+          "successes": 6
+        },
+        {
+          "action_std": 0.01,
+          "wrist_std": 0.005,
+          "episodes": 128,
+          "successes": 122
+        }
+      ]
+    },
+    "bounded_trials": {
+      "design_v3_trial_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v3_trial_01/training_result.json",
+        "result": {
+          "requested_iterations": 200,
+          "ppo_iterations": 80,
+          "stop_reason": "no_task_success",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 60,
+          "training_environment_steps": 491520,
+          "curriculum": {
+            "phase": 0.8,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.1,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 14658,
+            "promotions": [
+              {
+                "episodes": 5693,
+                "from": 0.9,
+                "to": 0.8,
+                "window_success_rate": 0.921875,
+                "evaluation_success_rate": 1.0
+              }
+            ]
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 1.0,
+          "tail_success_after": 1.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v4_trial_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v4_trial_01/training_result.json",
+        "result": {
+          "requested_iterations": 200,
+          "ppo_iterations": 60,
+          "stop_reason": "no_task_success",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 20,
+          "training_environment_steps": 368640,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 8853,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v5_trial_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v5_trial_01/training_result.json",
+        "result": {
+          "requested_iterations": 120,
+          "ppo_iterations": 60,
+          "stop_reason": "no_task_success",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 20,
+          "training_environment_steps": 737280,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 17430,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v6_trial_03": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v6_trial_03/training_result.json",
+        "result": {
+          "requested_iterations": 120,
+          "ppo_iterations": 120,
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 20,
+          "training_environment_steps": 737280,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.3046875,
+            "episodes": 16277,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 1.0,
+          "tail_success_after": 1.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v7_trial_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v7_trial_01/training_result.json",
+        "result": {
+          "requested_iterations": 120,
+          "ppo_iterations": 60,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "no_task_success",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 0,
+          "training_environment_steps": 368640,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 128,
+            "window_success_rate": 0.0,
+            "episodes": 7438,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v8_interface_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v8_interface_01/training_result.json",
+        "result": {
+          "requested_iterations": 1,
+          "ppo_iterations": 1,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 0,
+          "training_environment_steps": 384,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 8,
+            "window_success_rate": 0.0,
+            "episodes": 8,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v8_interface_02": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v8_interface_02/training_result.json",
+        "result": {
+          "requested_iterations": 1,
+          "ppo_iterations": 1,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 0,
+          "training_environment_steps": 384,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 8,
+            "window_success_rate": 0.0,
+            "episodes": 8,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      },
+      "design_v8_final_01": {
+        "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/design_v8_final_01/training_result.json",
+        "result": {
+          "requested_iterations": 1,
+          "ppo_iterations": 1,
+          "evaluated_iterations": 1,
+          "checkpoint_source": "latest.pt",
+          "partial_block_updates": "none",
+          "stop_reason": "iteration_budget",
+          "changed_actor_parameter_tensors": 8,
+          "best_iteration": 0,
+          "training_environment_steps": 96,
+          "curriculum": {
+            "phase": 0.9,
+            "window": 128,
+            "threshold": 0.8,
+            "step": 0.025,
+            "window_completed": 2,
+            "window_success_rate": 0.0,
+            "episodes": 2,
+            "promotions": []
+          },
+          "from_start_success_before": 0.0,
+          "from_start_success_after": 0.0,
+          "tail_success_before": 0.0,
+          "tail_success_after": 0.0,
+          "reward_stage": "prior",
+          "full_climb": "NOT RUN",
+          "qualified_for_deployment": false
+        }
+      }
+    },
+    "configuration": "configs/flip_4090.toml; duplicate diagnostic profile removed after tests",
+    "initialization": "Static gravity-aware output bias is experimental; clipped wrist target and residual torque logged. It did NOT establish sustained balance.",
+    "data_checks": {
+      "runtime_verified": 47,
+      "protected_original_files_verified": 76,
+      "changed_protected_files": []
+    },
+    "next_required_work": "Diagnose closed-loop standing instability and establish sustained balance prior before increasing PPO budget or training prepare",
+    "checkpoint_integrity": {
+      "status": "PASS",
+      "checks": [
+        "interruption preserves last evaluated weights",
+        "interruption before first evaluated block retains evaluated initialization",
+        "interrupted serialization preserves previous checkpoint"
+      ],
+      "implementation": "atomic replacement of assessed best/latest weights; partial weights explicitly unevaluated"
+    }
   }
 }

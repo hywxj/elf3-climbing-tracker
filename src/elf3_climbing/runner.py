@@ -39,8 +39,8 @@ class LegacyRslAdapter:
 
 def runner_config(overrides=None):
     cfg = {
-        "num_steps_per_env": 24,
-        "save_interval": 50,
+        "num_steps_per_env": 48,
+        "save_interval": 20,
         "empirical_normalization": True,
         "logger": "tensorboard",
         "policy": {
@@ -48,19 +48,19 @@ def runner_config(overrides=None):
             "actor_hidden_dims": [256, 128, 128],
             "critic_hidden_dims": [256, 128, 128],
             "activation": "elu",
-            "init_noise_std": 0.08,
+            "init_noise_std": 0.01,
             "noise_std_type": "log",
         },
         "algorithm": {
             "class_name": "PPO",
             "value_loss_coef": 1.0,
             "use_clipped_value_loss": True,
-            "clip_param": 0.2,
-            "entropy_coef": 0.001,
-            "num_learning_epochs": 4,
+            "clip_param": 0.1,
+            "entropy_coef": 0.0,
+            "num_learning_epochs": 2,
             "num_mini_batches": 4,
-            "learning_rate": 3e-4,
-            "schedule": "adaptive",
+            "learning_rate": 1e-4,
+            "schedule": "fixed",
             "gamma": 0.99,
             "lam": 0.95,
             "desired_kl": 0.01,

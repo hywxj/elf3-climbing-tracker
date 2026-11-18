@@ -12,6 +12,10 @@ RUN_FIELDS = {
     "seed",
     "no_curriculum",
     "no_pose_init",
+    "eval_interval",
+    "early_stop_patience",
+    "wrist_noise_std",
+    "balance_noise_std",
 }
 
 
@@ -25,7 +29,7 @@ def load_settings(path=None):
     run, ppo = data.get("run", {}), data.get("ppo", {})
     if set(run) - RUN_FIELDS:
         raise ValueError(f"Unknown run settings: {set(run) - RUN_FIELDS}")
-    for key in ("num_envs", "iterations", "steps"):
+    for key in ("num_envs", "iterations", "steps", "eval_interval", "early_stop_patience"):
         if key in run and (type(run[key]) is not int or run[key] < 1):
             raise ValueError(f"{key} must be a positive integer")
     for key, choices in {
@@ -37,6 +41,10 @@ def load_settings(path=None):
     for key in ("no_curriculum", "no_pose_init"):
         if key in run and type(run[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
+    if "wrist_noise_std" in run and not 0 < run["wrist_noise_std"] <= 0.02:
+        raise ValueError("wrist_noise_std must be in (0, 0.02]")
+    if "balance_noise_std" in run and not 0 < run["balance_noise_std"] <= 0.1:
+        raise ValueError("balance_noise_std must be in (0, 0.1]")
     defaults = runner_config()
     if set(ppo) - set(defaults):
         raise ValueError(f"Unknown PPO settings: {set(ppo) - set(defaults)}")

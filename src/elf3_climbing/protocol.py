@@ -73,11 +73,17 @@ class BackwardCurriculum:
         # Do not promote on easy late resets that were in flight before a promotion.
         for success, start in zip(successes, start_phases):
             self.episodes += 1
-            if abs(float(start) - self.phase) <= 0.03:
+            if abs(float(start) - self.phase) <= 1e-6:
                 self.samples.append(bool(success))
+
+    def promote(self, evaluated_phase, evaluation_success, min_evaluation_success=0.9):
+        """Advance once, only after an explicit matching-phase policy evaluation."""
+        if abs(float(evaluated_phase) - self.phase) > 1e-6:
+            return False
         if (
             len(self.samples) == self.window
             and sum(self.samples) / self.window >= self.threshold
+            and evaluation_success >= min_evaluation_success
             and self.phase > 0
         ):
             old = self.phase
@@ -89,9 +95,12 @@ class BackwardCurriculum:
                     "from": old,
                     "to": self.phase,
                     "window_success_rate": rate,
+                    "evaluation_success_rate": evaluation_success,
                 }
             )
             self.samples.clear()
+            return True
+        return False
 
     def state(self):
         return {
@@ -113,6 +122,19 @@ def premature_step(feet, initial_feet, direction, latched, before_approach, rule
 
 
 def completion_bonus(remaining_steps, dt):
-    # 6.5 exceeds the maximum positive dense reward rate (6.0). Completing now
+    # 10.5 exceeds the maximum positive dense reward rate (9.8). Completing now
     # must not pay less than waiting in an unfinished state for the same horizon.
-    return 2.0 + 6.5 * remaining_steps.clamp(min=0) * dt
+    return 2.0 + 10.5 * remaining_steps.clamp(min=0) * dt
+
+
+def velocity_tracking_errors(linear, angular, target_linear, target_angular):
+    """Track commanded motion; absolute forward speed is not a balance violation."""
+    return (
+        torch.linalg.vector_norm(linear - target_linear, dim=-1),
+        torch.linalg.vector_norm(angular - target_angular, dim=-1),
+    )
+
+
+def held_velocity_target(reference_velocity, held):
+    """A position frozen at the segment boundary must have a zero velocity target."""
+    return torch.where(held[:, None], 0.0, reference_velocity)

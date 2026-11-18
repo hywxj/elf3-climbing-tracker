@@ -23,6 +23,10 @@ def parser(settings=None):
     p.add_argument("--num-envs", type=int, default=4)
     p.add_argument("--steps", type=int, default=160)
     p.add_argument("--iterations", type=int, default=100)
+    p.add_argument("--eval-interval", type=int, default=20)
+    p.add_argument("--early-stop-patience", type=int, default=3)
+    p.add_argument("--wrist-noise-std", type=float, default=0.005)
+    p.add_argument("--balance-noise-std", type=float, default=0.01)
     p.add_argument("--reward-stage", choices=["prior", "refine"], default="prior")
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--play-episodes", type=int, default=0, help="play: 0 loops until window closes")
@@ -51,7 +55,12 @@ def main():
     args = p.parse_args()
     if args.output is None:
         p.error("--output is required")
-    if args.num_envs < 1 or args.steps < 1 or args.iterations < 1:
+    if (
+        min(
+            args.num_envs, args.steps, args.iterations, args.eval_interval, args.early_stop_patience
+        )
+        < 1
+    ):
         p.error("Counts must be positive")
     if (
         args.mode in ("evaluate", "play") or args.reward_stage == "refine"
@@ -66,6 +75,10 @@ def main():
         p.error(
             "play requires --num-envs 1, nonnegative --play-episodes and positive finite --play-speed"
         )
+    if not math.isfinite(args.wrist_noise_std) or not 0 < args.wrist_noise_std <= 0.02:
+        p.error("--wrist-noise-std must be in (0, 0.02]")
+    if not math.isfinite(args.balance_noise_std) or not 0 < args.balance_noise_std <= 0.1:
+        p.error("--balance-noise-std must be in (0, 0.1]")
     output = args.output.expanduser().resolve()
     if output.exists():
         p.error("Choose a new output directory")
@@ -73,6 +86,8 @@ def main():
     if not output.is_relative_to(OUTPUT.resolve()):
         p.error(f"Output must be inside {OUTPUT}")
     output.mkdir(parents=True)
+    if args.config is not None:
+        (output / "input_config.toml").write_bytes(args.config.read_bytes())
     (output / "request.json").write_text(
         json.dumps(
             {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
@@ -86,7 +101,6 @@ def main():
     failed = False
     try:
         import torch
-        import numpy as np
         from .environment import TrackerCfg, TrackerEnv
         from rsl_rl.runners import OnPolicyRunner
 
@@ -171,14 +185,22 @@ def main():
                 flush=True,
             )
         elif args.mode == "train" and not args.no_pose_init:
-            # A fixed final-pose action bias helps the backward curriculum start.
+            # Initialize a constant action bias; for flip, include static gravity load.
             # No per-frame reference is added to policy actions.
             with torch.no_grad():
-                runner.alg.policy.log_std[env.wrist_joint] = np.log(0.03)
                 runner.alg.policy.actor[-1].weight.zero_()
-                runner.alg.policy.actor[-1].bias.copy_(
-                    (env.ref["joint_pos"][env.segment_end] - env.nominal[0]) / cfg.action_scale
-                )
+                if args.segment == "flip":
+                    from .initialization import static_action_bias
+
+                    bias, seed_report = static_action_bias(env)
+                    (output / "initialization.json").write_text(json.dumps(seed_report, indent=2))
+                    runner.alg.policy.actor[-1].bias.copy_(
+                        torch.as_tensor(bias, device=env.device, dtype=torch.float32)
+                    )
+                else:
+                    runner.alg.policy.actor[-1].bias.copy_(
+                        (env.ref["joint_pos"][env.segment_end] - env.nominal[0]) / cfg.action_scale
+                    )
         if args.mode == "play":
             from .playback import play
 
@@ -194,68 +216,9 @@ def main():
                     json.dumps({k: v for k, v in result.items() if k != "episodes"}),
                 )
             else:
-                from dataclasses import asdict
+                from .training import train
 
-                contract = {
-                    "scope": "Reference-guided contact tracker trial, not full ACP or accepted climb",
-                    "reference": str(args.reference),
-                    "segment": args.segment,
-                    "height_source": "ground_truth_boxes",
-                    "real_lidar": "NOT CONNECTED",
-                    "gripper_dynamics": env.gripper_mass_report,
-                    "reward_stage": args.reward_stage,
-                    "gripper_rules": asdict(env.rules),
-                    "curriculum": env.curriculum.state(),
-                    "observation_schema": "elf3_contact_tracker_gripper_gate_v2",
-                    "actor_size": wrapped.obs["policy"].shape[1],
-                    "critic_size": wrapped.obs["critic"].shape[1],
-                    "initialization": "loaded checkpoint"
-                    if args.checkpoint
-                    else ("random" if args.no_pose_init else "fixed final-pose action bias"),
-                    "gripper_requirement_relaxed": False,
-                }
-                (output / "training_contract.json").write_text(json.dumps(contract, indent=2))
-                before = evaluate(runner, wrapped, 0.0)
-                before_tail = evaluate(runner, wrapped, 0.9)
-                (output / "evaluation_before.json").write_text(
-                    json.dumps({"from_start": before, "tail": before_tail}, indent=2)
-                )
-                env.training_mode = True
-                env.use_curriculum = cfg.curriculum_enabled
-                env.evaluation_start_phase = None
-                with torch.inference_mode():
-                    wrapped.obs, _ = env.reset()
-                before_weights = [v.detach().clone() for v in runner.alg.policy.actor.parameters()]
-                runner.learn(num_learning_iterations=args.iterations, init_at_random_ep_len=False)
-                runner.save(str(output / "checkpoint.pt"))
-                updated = sum(
-                    not torch.equal(a, b)
-                    for a, b in zip(before_weights, runner.alg.policy.actor.parameters())
-                )
-                if not updated:
-                    raise RuntimeError("PPO did not change actor parameters")
-                after = evaluate(runner, wrapped, 0.0)
-                after_tail = evaluate(runner, wrapped, 0.9)
-                (output / "evaluation_after.json").write_text(
-                    json.dumps({"from_start": after, "tail": after_tail}, indent=2)
-                )
-                summary = {
-                    "ppo_iterations": args.iterations,
-                    "changed_actor_parameter_tensors": updated,
-                    "training_environment_steps": args.iterations
-                    * runner.num_steps_per_env
-                    * env.num_envs,
-                    "curriculum": env.curriculum.state(),
-                    "from_start_success_before": before["success_fraction"],
-                    "from_start_success_after": after["success_fraction"],
-                    "tail_success_before": before_tail["success_fraction"],
-                    "tail_success_after": after_tail["success_fraction"],
-                    "reward_stage": args.reward_stage,
-                    "full_climb": "NOT RUN",
-                    "qualified_for_deployment": False,
-                }
-                (output / "training_result.json").write_text(json.dumps(summary, indent=2))
-                print("TRAINING_RESULT", json.dumps(summary))
+                train(runner, wrapped, args, output)
         else:
             from .smoke import run_smoke
 

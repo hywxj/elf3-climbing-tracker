@@ -1,21 +1,26 @@
-# Starting configuration for a 4090. 128 environments have NOT been benchmarked here.
-# CLI arguments override [run]. No training starts by reading this file.
+# Bounded diagnostic profile, usable locally or on 4090. Sustained balance has NOT passed.
 [run]
 segment = "flip"
 reward_stage = "prior"
 num_envs = 128
-iterations = 2000
+iterations = 200
+eval_interval = 20
+early_stop_patience = 3
+wrist_noise_std = 0.005
+balance_noise_std = 0.01
 seed = 42
 
 [ppo]
-num_steps_per_env = 24
-save_interval = 100
+num_steps_per_env = 48
+save_interval = 20
 
 [ppo.algorithm]
-learning_rate = 0.0003
-entropy_coef = 0.001
-num_learning_epochs = 4
+learning_rate = 0.0001
+schedule = "fixed"
+clip_param = 0.1
+entropy_coef = 0.0
+num_learning_epochs = 2
 num_mini_batches = 4
 
 [ppo.policy]
-init_noise_std = 0.08
+init_noise_std = 0.01

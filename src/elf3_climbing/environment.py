@@ -24,6 +24,8 @@ from .protocol import (
     BackwardCurriculum,
     premature_step,
     completion_bonus,
+    velocity_tracking_errors,
+    held_velocity_target,
 )
 
 PROPRIO_SIZE = 93  # angular velocity + gravity + q + qdot + previous action
@@ -78,8 +80,9 @@ class TrackerCfg(DirectRLEnvCfg):
     random_start: bool = False
     curriculum_enabled: bool = False
     reward_stage: str = "prior"
-    end_hold_steps: int = 10
-    extra_budget_steps: int = 50
+    end_hold_steps: int = 50
+    extra_budget_steps: int = 100
+    curriculum_step: float = 0.025
     action_scale: float = 1.0
     # Noise is disabled in the first interface/physics checks, not claimed sim2real-ready.
     height_noise_std: float = 0.0
@@ -157,8 +160,24 @@ class TrackerEnv(DirectRLEnv):
         self.completed = 0
         self.failed = 0
         self.successful = 0
+        self.outcome_names = [
+            "episodes",
+            "successes",
+            "timeout",
+            "root_error",
+            "orientation_error",
+            "joint_error",
+            "unexpected_contact",
+            "premature_advance",
+            "gripper_collision",
+            "lost_flip",
+            "premature_arm_contact",
+        ]
+        self.outcome_counts = torch.zeros(
+            len(self.outcome_names), dtype=torch.long, device=self.device
+        )
         self.rules = GripperRules()
-        self.curriculum = BackwardCurriculum()
+        self.curriculum = BackwardCurriculum(step=cfg.curriculum_step)
         self.training_mode = False
         self.use_curriculum = False
         self.curriculum_events = []
@@ -428,7 +447,7 @@ class TrackerEnv(DirectRLEnv):
             [
                 actor,
                 self.ref["joint_pos"][i],
-                self.ref["joint_vel"][i] * 0.05,
+                self.target_joint_velocities(i) * 0.05,
                 self.ref["root_pos"][i] + self.scene.env_origins - d.root_link_pos_w,
                 self.ref["root_quat"][i],
             ],
@@ -464,6 +483,17 @@ class TrackerEnv(DirectRLEnv):
         angle = 2 * torch.acos(dot)
         qerr = (d.joint_pos[:, self.joint_ids] - self.ref["joint_pos"][i]).square().mean(-1)
         return i, rooterr, angle, qerr
+
+    def target_root_velocities(self, frames):
+        # These short experiments end in a held pose. During motion, follow the
+        # reference velocity. Once its position is clamped, its velocity is zero.
+        held = frames >= self.segment_end
+        linear = held_velocity_target(self.ref["root_lin_vel"][frames], held)
+        angular = held_velocity_target(self.ref["root_ang_vel"][frames], held)
+        return linear, angular
+
+    def target_joint_velocities(self, frames):
+        return held_velocity_target(self.ref["joint_vel"][frames], frames >= self.segment_end)
 
     def _get_dones(self):
         d = self.robot.data
@@ -523,6 +553,14 @@ class TrackerEnv(DirectRLEnv):
             support = (
                 support & (forces[:, 2:4] > 3).all(-1) & (point_error < 0.05).all(-1) & (up < 0.524)
             )
+        root_speed = torch.linalg.vector_norm(d.root_link_lin_vel_w, dim=-1)
+        root_angular_speed = torch.linalg.vector_norm(d.root_ang_vel_w, dim=-1)
+        target_linear, target_angular = self.target_root_velocities(i)
+        velocity_error, angular_velocity_error = velocity_tracking_errors(
+            d.root_link_lin_vel_w, d.root_ang_vel_w, target_linear, target_angular
+        )
+        # Completion check only: never terminate a moving episode on absolute speed.
+        stable = (velocity_error < 0.25) & (angular_velocity_error < 0.5)
         near_end = (
             (i >= self.segment_end)
             & ~failure
@@ -530,6 +568,7 @@ class TrackerEnv(DirectRLEnv):
             & (angle < 0.4)
             & (qerr < 0.12)
             & support
+            & stable
             & ready
         )
         self.end_settle.copy_(
@@ -541,15 +580,35 @@ class TrackerEnv(DirectRLEnv):
         )
         timeout = success | expired
         done = failure | timeout
-        if self.training_mode and self.cfg.curriculum_enabled and done.any():
-            previous = self.curriculum.phase
-            self.curriculum.observe(success[done].tolist(), self.reset_phase[done].tolist())
-            if previous != self.curriculum.phase:
-                self.curriculum_events.append(self.curriculum.state())
+        if self.training_mode:
+            self.outcome_counts += torch.stack(
+                [
+                    done.sum(),
+                    success.sum(),
+                    (expired & ~success & ~failure).sum(),
+                    (done & (pos > 0.45)).sum(),
+                    (done & (angle > 1.1)).sum(),
+                    (done & (qerr > 1.0)).sum(),
+                    (done & forbidden).sum(),
+                    (done & premature).sum(),
+                    (done & collision).sum(),
+                    (done & lost_flip).sum(),
+                    (done & early_arm).sum(),
+                ]
+            )
+            if self.cfg.curriculum_enabled and done.any():
+                self.curriculum.observe(success[done].tolist(), self.reset_phase[done].tolist())
         self.completed += int(done.sum())
         self.failed += int((done & ~success).sum())
         self.successful += int(success.sum())
         self.last_metrics = {
+            "root_velocity_error_m_s": velocity_error.detach().clone(),
+            "root_angular_velocity_error_rad_s": angular_velocity_error.detach().clone(),
+            "root_speed_m_s": root_speed.detach().clone(),
+            "root_angular_speed_rad_s": root_angular_speed.detach().clone(),
+            "terminated": failure.detach().clone(),
+            "expired": expired.detach().clone(),
+            "failure_joint": (qerr > 1.0).detach().clone(),
             "root_error_m": pos.detach().clone(),
             "orientation_error_rad": angle.detach().clone(),
             "joint_rmse_rad": qerr.sqrt().detach().clone(),
@@ -586,7 +645,7 @@ class TrackerEnv(DirectRLEnv):
     def _get_rewards(self):
         i, pos, angle, qerr = self._measure()
         d = self.robot.data
-        qvel = (d.joint_vel[:, self.joint_ids] - self.ref["joint_vel"][i]).square().mean(-1)
+        qvel = (d.joint_vel[:, self.joint_ids] - self.target_joint_velocities(i)).square().mean(-1)
         mask = self.ref["contact_mask"][i]
         distance = (
             (self.site_positions() - self.scene.env_origins[:, None, :] - self.ref["site_pos"][i])
@@ -603,13 +662,19 @@ class TrackerEnv(DirectRLEnv):
         imitation_weight = 1.0 if self.cfg.reward_stage == "prior" else 0.35
         gripper_score = (1 - ge.abs() / 1.309).clamp(0, 1)
         forearm_orientation = torch.exp(-up.square() / 0.12) * self.hold_mask[i].float()
+        target_linear, target_angular = self.target_root_velocities(i)
+        linear_velocity_error, angular_velocity_error = velocity_tracking_errors(
+            d.root_link_lin_vel_w, d.root_ang_vel_w, target_linear, target_angular
+        )
         reward = (
             imitation_weight * torch.exp(-qerr / 0.15)
-            + torch.exp(-pos.square() / 0.04)
+            + 2.0 * torch.exp(-pos.square() / 0.04)
+            + 2.0 * torch.exp(-linear_velocity_error.square() / 0.25)
+            + 0.5 * torch.exp(-angular_velocity_error.square() / 0.25)
             + 0.5 * torch.exp(-angle.square() / 0.25)
             + imitation_weight * 0.1 * torch.exp(-qvel / 10)
             + 1.5 * gripper_score
-            + 0.3 * torch.exp(-ge.square() / 0.01 - gv.square() / 0.0625)
+            + 0.6 * torch.exp(-ge.square() / 0.01 - gv.square() / 0.0625)
             + 0.3 * forearm_orientation
             + contact
             + 0.3 * actual
@@ -625,6 +690,14 @@ class TrackerEnv(DirectRLEnv):
         )
         reward -= 0.5 * (self.reset_time_outs & ~self.last_metrics["success"]).float()
         self.extras["log"] = {
+            "Episodes/success_fraction": self.outcome_counts[1].float()
+            / self.outcome_counts[0].clamp(min=1),
+            "Episodes/timeout_fraction": self.outcome_counts[2].float()
+            / self.outcome_counts[0].clamp(min=1),
+            "Tracker/root_speed_m_s": torch.linalg.vector_norm(
+                d.root_link_lin_vel_w, dim=-1
+            ).mean(),
+            "Tracker/gripper_speed_rad_s": gv.abs().mean(),
             "Tracker/root_error_m": pos.mean(),
             "Tracker/joint_rmse_rad": qerr.sqrt().mean(),
             "Tracker/reference_contact_score": contact.mean(),
