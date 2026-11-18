@@ -138,3 +138,9 @@ def velocity_tracking_errors(linear, angular, target_linear, target_angular):
 def held_velocity_target(reference_velocity, held):
     """A position frozen at the segment boundary must have a zero velocity target."""
     return torch.where(held[:, None], 0.0, reference_velocity)
+
+
+def tolerant_velocity_reward(error, tolerance):
+    """Equal reward throughout the small-error band, smooth decay beyond it."""
+    excess = (error - tolerance).clamp(min=0)
+    return torch.exp(-excess.square() / 0.25)

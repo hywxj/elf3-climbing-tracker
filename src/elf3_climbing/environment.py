@@ -26,6 +26,7 @@ from .protocol import (
     completion_bonus,
     velocity_tracking_errors,
     held_velocity_target,
+    tolerant_velocity_reward,
 )
 
 PROPRIO_SIZE = 93  # angular velocity + gravity + q + qdot + previous action
@@ -83,6 +84,8 @@ class TrackerCfg(DirectRLEnvCfg):
     end_hold_steps: int = 50
     extra_budget_steps: int = 100
     curriculum_step: float = 0.025
+    linear_velocity_reward_tolerance: float = 0.05  # m/s error, not absolute speed
+    angular_velocity_reward_tolerance: float = 0.1  # rad/s error
     action_scale: float = 1.0
     # Noise is disabled in the first interface/physics checks, not claimed sim2real-ready.
     height_noise_std: float = 0.0
@@ -666,11 +669,17 @@ class TrackerEnv(DirectRLEnv):
         linear_velocity_error, angular_velocity_error = velocity_tracking_errors(
             d.root_link_lin_vel_w, d.root_ang_vel_w, target_linear, target_angular
         )
+        linear_velocity_score = tolerant_velocity_reward(
+            linear_velocity_error, self.cfg.linear_velocity_reward_tolerance
+        )
+        angular_velocity_score = tolerant_velocity_reward(
+            angular_velocity_error, self.cfg.angular_velocity_reward_tolerance
+        )
         reward = (
             imitation_weight * torch.exp(-qerr / 0.15)
             + 2.0 * torch.exp(-pos.square() / 0.04)
-            + 2.0 * torch.exp(-linear_velocity_error.square() / 0.25)
-            + 0.5 * torch.exp(-angular_velocity_error.square() / 0.25)
+            + 2.0 * linear_velocity_score
+            + 0.5 * angular_velocity_score
             + 0.5 * torch.exp(-angle.square() / 0.25)
             + imitation_weight * 0.1 * torch.exp(-qvel / 10)
             + 1.5 * gripper_score
@@ -690,6 +699,10 @@ class TrackerEnv(DirectRLEnv):
         )
         reward -= 0.5 * (self.reset_time_outs & ~self.last_metrics["success"]).float()
         self.extras["log"] = {
+            "Tracker/root_velocity_error_m_s": linear_velocity_error.mean(),
+            "Tracker/root_angular_velocity_error_rad_s": angular_velocity_error.mean(),
+            "RewardRate/linear_velocity_tracking": 2.0 * linear_velocity_score.mean(),
+            "RewardRate/angular_velocity_tracking": 0.5 * angular_velocity_score.mean(),
             "Episodes/success_fraction": self.outcome_counts[1].float()
             / self.outcome_counts[0].clamp(min=1),
             "Episodes/timeout_fraction": self.outcome_counts[2].float()

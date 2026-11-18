@@ -160,5 +160,36 @@ class HeldReferenceTests(unittest.TestCase):
         self.assertNotEqual(float(reference[1, 0]), 0.0)
 
 
+class TolerantVelocityRewardTests(unittest.TestCase):
+    def test_small_nonzero_errors_receive_full_reward(self):
+        from elf3_climbing.protocol import tolerant_velocity_reward
+
+        for tolerance in (0.05, 0.1):
+            errors = torch.tensor([0.0, tolerance / 2, tolerance], requires_grad=True)
+            scores = tolerant_velocity_reward(errors, tolerance)
+            torch.testing.assert_close(scores, torch.ones(3))
+            scores.sum().backward()
+            torch.testing.assert_close(errors.grad, torch.zeros(3))
+
+    def test_larger_errors_reduce_reward_smoothly(self):
+        from elf3_climbing.protocol import tolerant_velocity_reward
+
+        errors = torch.tensor([0.05, 0.05001, 0.1, 0.3, 0.8])
+        scores = tolerant_velocity_reward(errors, 0.05)
+        self.assertTrue(torch.all(scores[1:] <= scores[:-1]))
+        self.assertAlmostEqual(float(scores[1]), 1.0, places=6)
+        self.assertTrue(torch.all((scores > 0) & (scores <= 1)))
+
+    def test_moving_reference_allows_small_tracking_error(self):
+        from elf3_climbing.protocol import velocity_tracking_errors, tolerant_velocity_reward
+
+        target = torch.tensor([[0.7, 0.0, 0.0]])
+        actual = torch.tensor([[0.67, 0.0, 0.0]])
+        zero = torch.zeros(1, 3)
+        error, _ = velocity_tracking_errors(actual, zero, target, zero)
+        self.assertGreater(float(error), 0.0)
+        self.assertEqual(float(tolerant_velocity_reward(error, 0.05)), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

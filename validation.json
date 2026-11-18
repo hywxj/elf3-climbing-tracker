@@ -2,7 +2,7 @@
   "date": "2026-11-18",
   "scope": "Historical checks retained; training_design_revision is the current acceptance status",
   "offline_tests": {
-    "passed": 39,
+    "passed": 42,
     "failed": 0,
     "skipped": 0
   },
@@ -466,5 +466,33 @@
       ],
       "implementation": "atomic replacement of assessed best/latest weights; partial weights explicitly unevaluated"
     }
+  },
+  "velocity_tolerance_update": {
+    "protocol": "precision_tracking_v9",
+    "reward_version": "tolerant_reference_velocity_v9",
+    "linear_reward_full_credit_m_s": 0.05,
+    "angular_reward_full_credit_rad_s": 0.1,
+    "terminal_completion_thresholds_changed": false,
+    "tests_passed": 42,
+    "ruff": "PASS",
+    "smoke_path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/velocity_tolerance_v9_smoke_01/smoke.json",
+    "smoke": {
+      "interface_smoke": "PASS",
+      "terrain_force_filter": "PASS_NONZERO_LOADED_FEET",
+      "controller": "zero",
+      "steps": 20,
+      "num_envs": 2,
+      "physical_episodes": 0,
+      "failed_episodes": 0,
+      "successful_short_episodes": 0,
+      "optimizer_updates": 0,
+      "short_segment_tracking": "FAIL",
+      "full_climb": "NOT RUN",
+      "real_lidar": "NOT CONNECTED",
+      "scope": "Physics advanced with PD joint targets; root/joints written only at reset. This is not a learned policy."
+    },
+    "ppo_updates": 0,
+    "convergence": "NOT RUN",
+    "scope": "Allows nonzero small velocity tracking errors; not an absolute speed cap or evidence that previous balance failure is solved"
   }
 }

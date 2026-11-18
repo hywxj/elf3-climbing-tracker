@@ -42,8 +42,8 @@ def train(runner, wrapped, args, output):
     runner.alg.policy.log_std.requires_grad_(False)
     runner.current_learning_iteration = 0  # --checkpoint is an explicit warm start, not resume
     contract = {
-        "protocol": "precision_tracking_v8",
-        "reward_version": "reference_velocity_with_terminal_hold_v8",
+        "protocol": "precision_tracking_v9",
+        "reward_version": "tolerant_reference_velocity_v9",
         "reference": str(args.reference),
         "segment": args.segment,
         "height_source": "ground_truth_boxes",
@@ -59,6 +59,11 @@ def train(runner, wrapped, args, output):
             "continuous_hold_s": env.cfg.end_hold_steps * env.step_dt,
         },
         "reward_stage": args.reward_stage,
+        "velocity_reward_full_credit_band": {
+            "linear_error_m_s": env.cfg.linear_velocity_reward_tolerance,
+            "angular_error_rad_s": env.cfg.angular_velocity_reward_tolerance,
+            "outside_band": "exp(-max(error-tolerance,0)^2/0.25)",
+        },
         "exploration": {
             "fixed": True,
             "joint_std": runner.policy_cfg["init_noise_std"],
