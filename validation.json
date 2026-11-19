@@ -1,8 +1,8 @@
 {
-  "date": "2026-11-18",
-  "scope": "Historical checks retained; wrist_flip_stage_v2 is the current fixed-scene standing-plus-flip result. No full climb or deployment acceptance.",
+  "date": "2026-11-19",
+  "scope": "Fixed-scene standing/flip evidence retained. Blind walking integration passed; independent walking evaluation failed. No handover or full-climb acceptance.",
   "offline_tests": {
-    "passed": 60,
+    "passed": 63,
     "failed": 0,
     "skipped": 0
   },
@@ -1076,5 +1076,94 @@
       "No approach, arm support, climb, payload adaptation or hardware deployment tested"
     ],
     "evidence": "Source parameters, code hashes, training_contract.json, standing_transfer.json, evaluation_before.json and evaluation_*.json in each run directory"
+  },
+  "blind_walking_v1": {
+    "integration": "PASS",
+    "walking_capability": "FAIL",
+    "handover": "NOT RUN",
+    "full_climb": "NOT RUN",
+    "added_gripper_mass_kg": 0.0,
+    "source": "Read-only local TienKung-Lab walk_elf3 extension; no Hiking changes",
+    "training_scope": "New actor, not a transfer of the accepted standing actor; 60 iterations are a bounded pilot only",
+    "data": {
+      "source": "/home/hamlet/TienKung-Lab/logs/data_preparation/elf3_gmr_v1/manifest.json",
+      "source_sha256": "77a5406eaedbbd7205b1580ae1695188763263e003c4999f77a168daed443622",
+      "category": "walk_turn",
+      "train": 168,
+      "validation": 46,
+      "physical_execution_validated": false
+    },
+    "contract": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/blind_walk_pilot_02/contract.json",
+    "smoke": {
+      "integration": "PASS",
+      "iterations": 2,
+      "changed_actor_tensors": 6,
+      "walking_capability": "NOT RUN",
+      "handover": "NOT RUN",
+      "full_climb": "NOT RUN"
+    },
+    "pilot": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/blind_walk_pilot_02",
+      "integration": "PASS",
+      "iterations": 60,
+      "changed_actor_tensors": 6,
+      "walking_capability": "NOT RUN",
+      "handover": "NOT RUN",
+      "full_climb": "NOT RUN"
+    },
+    "evaluation": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/blind_walk_eval_02",
+      "walking_capability": "FAIL",
+      "protocol": "stop2s_forward0.2m_s4s_stop4s",
+      "num_envs": 32,
+      "success_fraction": 0.0,
+      "failures": 32,
+      "velocity_error_mean_m_s": 0.8035317063331604,
+      "wrist_peak_error_rad": 0.01302635669708252,
+      "stop_speed_mean_m_s": 0.5023900270462036,
+      "forward_distance_mean_m": -0.011040035635232925,
+      "per_env_success": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "handover": "NOT RUN",
+      "full_climb": "NOT RUN"
+    },
+    "historical_issues": [
+      "smoke_01 collision checker inspected the Xform instead of geometry/mesh; corrected",
+      "smoke_02 and pilot_01 finished computation but hung during Isaac cleanup; those processes were terminated after result files were written; new skip_cleanup API exits normally",
+      "pilot_01 used 0.9 soft limits that clipped reset wrist angle by 0.131 rad; pilot_02 uses actual limits as the accepted flip task does"
+    ],
+    "recommended_checkpoint": null
   }
 }
