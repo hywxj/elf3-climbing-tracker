@@ -1247,5 +1247,35 @@
     "wrist_vs_unflipped_gait_comparison": "NOT RUN",
     "scope": "Prior retention verified; no claim that wrist flip no longer affects gait. Four updates test the training connection, not convergence.",
     "historical_initial_load_error": "continuation_prefix_01: local RSL ActorCritic.load_state_dict returns bool; switched to torch.nn.Module loader for explicit missing-key validation"
+  },
+  "standing_to_approach_landing_200": {
+    "train_dir": "approach_landing_20261119_01",
+    "evaluation_dir": "approach_landing_20261119_eval_01",
+    "evaluation_checkpoint": "latest.pt",
+    "checkpoint_selection_best_iteration": 0,
+    "optimizer_iterations": 200,
+    "environment_steps": 4915200,
+    "original_run_interrupted_for_endpoint_correction": "approach_from_flip_20261119_2141",
+    "landing_reference_frame": 128,
+    "required_consecutive_landing_steps": 3,
+    "required_original_flip_hold_s": 5,
+    "prefix_passed": 512,
+    "prefix_envs": 512,
+    "swing_seen_at_200": 512,
+    "first_step_successes_at_200": 0,
+    "independent_evaluation": {
+      "envs": 32,
+      "swing_seen": 32,
+      "root_error_terminations": 32,
+      "lost_flip": 0,
+      "passes": 0
+    },
+    "left_knee_frame_106_one_env": {
+      "base_target": 0.3735627233982086,
+      "residual": -0.15000000596046448,
+      "measured_q": 0.20235617458820343,
+      "ref_q": 1.3124717473983765
+    },
+    "scope": "Fixed-scene first-step training with zero additional gripper mass. No advancement to two-step or platform."
   }
 }

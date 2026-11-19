@@ -21,7 +21,7 @@ def suite(runner, wrapped, phase):
     current = start if phase == 0 else tail if phase == 0.9 else evaluate(runner, wrapped, phase)
     probe = (
         evaluate(runner, wrapped, phase, hold_steps=50)
-        if wrapped.env.cfg.end_hold_steps > 50
+        if wrapped.env.required_hold_steps > 50
         else current
     )
     return {"from_start": start, "tail": tail, "current": current, "short_probe": probe}
@@ -128,11 +128,13 @@ def train(runner, wrapped, args, output):
         "gripper_rules": asdict(env.rules),
         "gripper_requirement_relaxed": env.balance_only,
         "additional_terminal_stability": {
-            "scope": "Completion only; current segment ends in a held pose. No absolute-speed episode termination.",
+            "scope": "Left swing, then left-foot landing at reference speed"
+            if env.first_landing
+            else "Held end pose",
             "linear_velocity_error_m_s": 0.25,
             "angular_velocity_error_rad_s": 0.5,
-            "continuous_hold_steps": env.cfg.end_hold_steps,
-            "continuous_hold_s": env.cfg.end_hold_steps * env.step_dt,
+            "continuous_hold_steps": env.required_hold_steps,
+            "continuous_hold_s": env.required_hold_steps * env.step_dt,
         },
         "reward_stage": args.reward_stage,
         "velocity_reward_full_credit_band": {

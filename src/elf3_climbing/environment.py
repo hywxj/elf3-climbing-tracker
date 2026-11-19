@@ -229,6 +229,7 @@ class TrackerEnv(DirectRLEnv):
         self.ref_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.gate_settle = self.ref_steps.clone()
         self.end_settle = self.ref_steps.clone()
+        self.left_swing_seen = torch.zeros_like(self.ref_steps, dtype=torch.bool)
         self.gate_latched = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.gate_allowed = self.gate_latched.clone()
         self.assumed_prerequisite = self.gate_latched.clone()
@@ -347,6 +348,14 @@ class TrackerEnv(DirectRLEnv):
             self.scene.sensors["support_" + body] = sensor
         light = sim_utils.DomeLightCfg(intensity=1500.0)
         light.func("/World/Light", light)
+
+    @property
+    def first_landing(self):
+        return self.cfg.segment == "approach" and self.segment_end == 128
+
+    @property
+    def required_hold_steps(self):
+        return 3 if self.first_landing else self.cfg.end_hold_steps
 
     def frames(self):
         return (self.starts + self.ref_steps).clamp(max=self.segment_end)
@@ -549,6 +558,8 @@ class TrackerEnv(DirectRLEnv):
         return i, rooterr, angle, qerr
 
     def target_root_velocities(self, frames):
+        if self.first_landing:
+            return self.ref["root_lin_vel"][frames], self.ref["root_ang_vel"][frames]
         # These short experiments end in a held pose. During motion, follow the
         # reference velocity. Once its position is clamped, its velocity is zero.
         held = frames >= self.segment_end
@@ -557,6 +568,8 @@ class TrackerEnv(DirectRLEnv):
         return linear, angular
 
     def target_joint_velocities(self, frames):
+        if self.first_landing:
+            return self.ref["joint_vel"][frames]
         return held_velocity_target(self.ref["joint_vel"][frames], frames >= self.segment_end)
 
     def _get_dones(self):
@@ -575,10 +588,9 @@ class TrackerEnv(DirectRLEnv):
         self.gate_latched.copy_(latched)
         self.gate_allowed.copy_(allowed)
         next_frame = self.starts + self.ref_steps + 1
+        barrier = self.flip_end_frame + 1 if self.first_landing else self.approach_barrier
         blocked = (
-            (next_frame >= self.approach_barrier)
-            & ~self.gate_allowed
-            & (self.starts < self.approach_barrier)
+            (next_frame >= barrier) & ~self.gate_allowed & (self.starts < self.approach_barrier)
         )
         self.ref_steps += (~blocked).long()
         i, pos, angle, qerr = self._measure()
@@ -609,10 +621,24 @@ class TrackerEnv(DirectRLEnv):
             | collision
             | lost_flip
         )
-        forces = torch.linalg.vector_norm(self.support_forces(), dim=-1)
+        contact_forces = self.support_forces()
+        forces = torch.linalg.vector_norm(contact_forces, dim=-1)
         early_arm = (forces[:, 2:4] > 3).any(-1) & ~self.gate_latched
         failure = failure | early_arm
         support = (forces[:, :2] > 5).all(-1)
+        if self.first_landing:
+            # Remember physical swing before crediting a subsequent landing.
+            left_rise = feet[:, 0, 2] - self.ref["site_pos"][self.flip_end_frame, 0, 2]
+            self.left_swing_seen |= (
+                self.gate_allowed
+                & (i > self.flip_end_frame)
+                & (i < self.segment_end)
+                & (left_rise > 0.03)
+                & (forces[:, 0] < 5)
+                & (contact_forces[:, 1, 2] > 20)
+            )
+            landing_error = (feet[:, 0] - self.ref["site_pos"][self.segment_end, 0]).norm(dim=-1)
+            support = self.left_swing_seen & (contact_forces[:, 0, 2] > 20) & (landing_error < 0.06)
         if self.cfg.segment == "prepare":
             point_error = torch.linalg.vector_norm(
                 self.site_positions()[:, 2:6]
@@ -644,11 +670,14 @@ class TrackerEnv(DirectRLEnv):
         self.end_settle.copy_(
             torch.where(near_end, self.end_settle + 1, torch.zeros_like(self.end_settle))
         )
-        success = self.end_settle >= self.cfg.end_hold_steps
+        success = self.end_settle >= self.required_hold_steps
         expired = self.episode_length_buf >= (
             self.segment_end - self.starts + self.cfg.extra_budget_steps
         )
         timeout = success | expired
+        if self.first_landing:
+            expired |= self.starts + self.ref_steps >= self.segment_end + 15
+            timeout = success | expired
         done = failure | timeout
         if self.training_mode:
             self.outcome_counts += torch.stack(
@@ -685,6 +714,7 @@ class TrackerEnv(DirectRLEnv):
             "orientation_error_rad": angle.detach().clone(),
             "joint_rmse_rad": qerr.sqrt().detach().clone(),
             "success": success.detach().clone(),
+            "left_swing_seen": self.left_swing_seen.clone(),
             "foot_force_N": forces[:, :2].detach().clone(),
             "failure_orientation": (angle > 1.1).detach().clone(),
             "failure_root": (pos > 0.45).detach().clone(),
@@ -774,6 +804,10 @@ class TrackerEnv(DirectRLEnv):
             - 0.02 * smooth
             - 0.00005 * torque
         ) * self.step_dt
+        if self.first_landing:
+            # Give feedback during swing as well as contact, using the same FK reference.
+            moving = (i > self.flip_end_frame) & self.gate_allowed
+            reward += 2.0 * self.step_dt * moving * torch.exp(-distance[:, 0] / 0.01)
         remaining = (
             self.segment_end - self.starts + self.cfg.extra_budget_steps - self.episode_length_buf
         )
@@ -838,6 +872,7 @@ class TrackerEnv(DirectRLEnv):
         self.ref_steps[env_ids] = 0
         self.gate_settle[env_ids] = 0
         self.end_settle[env_ids] = 0
+        self.left_swing_seen[env_ids] = False
         self.assumed_prerequisite[env_ids] = self.starts[env_ids] >= self.approach_barrier
         self.gate_latched[env_ids] = self.assumed_prerequisite[env_ids]
         self.gate_allowed[env_ids] = self.assumed_prerequisite[env_ids]

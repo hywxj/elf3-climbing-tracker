@@ -61,6 +61,7 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
                         {
                             "environment": k,
                             "steps": step + 1,
+                            "left_swing_seen": bool(m["left_swing_seen"][k]),
                             "walking_samples": int(walk_count[k]),
                             "walking_wrist_error_max_rad": float(walk_wrist_peak[k])
                             if walk_count[k]
@@ -130,8 +131,8 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
         count = sum(e["success"] for e in episodes)
         return {
             "start_phase": start_phase,
-            "required_hold_steps": env.cfg.end_hold_steps,
-            "required_hold_s": env.cfg.end_hold_steps * env.step_dt,
+            "required_hold_steps": env.required_hold_steps,
+            "required_hold_s": env.required_hold_steps * env.step_dt,
             "completed_episodes": len(episodes),
             "successes": count,
             "success_fraction": count / max(1, env.num_envs),
