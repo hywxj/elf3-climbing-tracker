@@ -106,8 +106,8 @@ class TrackerEnv(DirectRLEnv):
 
             self.reference_np, self.task_report = ground_standing_reference(self.reference_np)
             if not self.balance_only:
-                if cfg.segment not in ("flip", "approach"):
-                    raise ValueError("Flat-ground override supports flip/approach only")
+                if cfg.segment not in ("flip", "approach", "walk"):
+                    raise ValueError("Flat-ground override requires flip, approach or walk")
                 self.task_report.update(
                     task="flip_ground_v1",
                     flip_required=True,
@@ -123,6 +123,12 @@ class TrackerEnv(DirectRLEnv):
         segments = json.loads(str(self.reference_np["segments_json"]))
         segments["balance"] = [0, 0]
         self.flip_end_frame = int(segments["flip"][1])
+        if cfg.segment == "walk":
+            segments["walk"] = segments["flip"]
+            cfg.end_hold_steps = cfg.flip_hold_steps
+            self.task_report.update(
+                task="flat_velocity_walk", scope="Flip, walk, change speed, stop"
+            )
         if cfg.segment == "approach":
             if not cfg.flat_ground or cfg.approach_end_frame not in (self.flip_end_frame, 128, 173):
                 raise ValueError("Approach requires flat ground and end frame 73, 128 or 173")
@@ -151,7 +157,7 @@ class TrackerEnv(DirectRLEnv):
         )
         segments["prepare"] = [int(prepare[0]), int(prepare[-1])]
         if cfg.segment not in segments:
-            raise ValueError("Only balance/flip/approach/stand/prepare experiments are enabled")
+            raise ValueError(f"Unknown reference segment {cfg.segment}")
         self.segment_start, self.segment_end = segments[cfg.segment]
         if cfg.segment in ("flip", "approach"):
             cfg.end_hold_steps = cfg.flip_hold_steps

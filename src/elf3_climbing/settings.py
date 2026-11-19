@@ -44,7 +44,7 @@ def load_settings(path=None):
         if key in run and (type(run[key]) is not int or run[key] < 1):
             raise ValueError(f"{key} must be a positive integer")
     for key, choices in {
-        "segment": {"balance", "flip", "stand", "prepare", "approach"},
+        "segment": {"balance", "flip", "stand", "prepare", "approach", "walk"},
         "reward_stage": {"prior", "refine"},
     }.items():
         if key in run and run[key] not in choices:

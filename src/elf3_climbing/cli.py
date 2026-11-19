@@ -20,7 +20,9 @@ def parser(settings=None):
     p.add_argument("--mode", choices=["smoke", "train", "evaluate", "play"], default="smoke")
     p.add_argument("--reference", type=Path, default=DEFAULT_PACK)
     p.add_argument(
-        "--segment", choices=["balance", "flip", "stand", "prepare", "approach"], default="flip"
+        "--segment",
+        choices=["balance", "flip", "stand", "prepare", "approach", "walk"],
+        default="flip",
     )
     p.add_argument("--approach-end-frame", type=int, choices=[73, 128, 173], default=128)
     p.add_argument("--num-envs", type=int, default=4)
@@ -72,10 +74,12 @@ def main():
     )
     if args.output is None:
         p.error("--output is required")
-    if args.segment == "approach" and (
+    if args.segment in ("walk", "approach") and (
         not args.checkpoint or not args.flat_ground or not args.no_curriculum
     ):
-        p.error("Approach continuation requires checkpoint, flat ground and no backward curriculum")
+        p.error("Walking continuation requires checkpoint, flat ground and no backward curriculum")
+    if args.segment == "walk" and (args.mode == "smoke" or args.reward_stage != "prior"):
+        p.error("walk supports train, evaluate and play with its commanded-walking rewards")
     if (
         min(
             args.num_envs,
@@ -141,7 +145,12 @@ def main():
         cfg.random_start = False
         cfg.curriculum_enabled = args.mode == "train" and not args.no_curriculum
         cfg.reward_stage = args.reward_stage
-        env = TrackerEnv(cfg)
+        if args.segment == "walk":
+            from .walk_env import WalkEnv
+
+            env = WalkEnv(cfg)
+        else:
+            env = TrackerEnv(cfg)
         wrapped = LegacyRslAdapter(env)
         calibration = check_model_frames(env)
         wrapped.obs = env._get_observations()
@@ -195,7 +204,7 @@ def main():
         )
         # Construction verifies the actual installed PPO/observation interface even in smoke mode.
         ppo_cfg = runner_config(settings["ppo"])
-        if args.segment == "approach":
+        if args.segment in ("walk", "approach"):
             import rsl_rl.runners.on_policy_runner as runner_module
             from .continuation import StandingContinuationActorCritic
 
@@ -206,6 +215,12 @@ def main():
                 for j, n in enumerate(env.reference_np["joint_names"].tolist())
                 if any(part in n for part in ("waist", "hip", "knee", "ankle"))
             ]
+            if args.segment == "walk":
+                from .walk_policy import WalkActorCritic
+
+                runner_module.WalkActorCritic = WalkActorCritic
+                ppo_cfg["policy"]["class_name"] = "WalkActorCritic"
+                ppo_cfg["empirical_normalization"] = False
         (output / "ppo_config.json").write_text(json.dumps(ppo_cfg, indent=2))
         runner = OnPolicyRunner(
             wrapped,
@@ -222,7 +237,23 @@ def main():
                 raise ValueError(
                     "Start balance from scratch or use a balance checkpoint; flip weights are not a standing prior"
                 )
-            if args.segment == "approach":
+            if args.segment == "walk":
+                if previous_segment == "flip":
+                    runner.alg.policy.inherit_flip(
+                        ckpt, args.balance_noise_std, args.wrist_noise_std
+                    )
+                elif previous_segment == "walk":
+                    torch.nn.Module.load_state_dict(runner.alg.policy, weights, strict=True)
+                else:
+                    raise ValueError("walk requires a flip or walk best.pt/latest.pt checkpoint")
+                env.transfer_report = {
+                    "source": str(args.checkpoint),
+                    "source_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
+                    "source_segment": previous_segment,
+                    "frozen_flip_actor_and_normalization": True,
+                    "trainable_outputs": "waist and legs",
+                }
+            elif args.segment == "approach":
                 from .continuation import inherit_standing_checkpoint, freeze_prior_statistics
 
                 if previous_segment not in ("flip", "approach"):
@@ -261,7 +292,7 @@ def main():
                 raise ValueError(
                     "Checkpoint observation schema mismatch; implicit padding is forbidden"
                 )
-            if args.segment != "approach":
+            if args.segment not in ("walk", "approach"):
                 runner.load(str(args.checkpoint), load_optimizer=False)
             if previous_segment == "balance" and args.segment == "flip":
                 if args.mode != "train" or not args.flat_ground or not args.no_curriculum:
@@ -316,6 +347,15 @@ def main():
             from .playback import play
 
             play(runner, wrapped, app, args, output)
+        elif args.segment == "walk":
+            from .walk_training import evaluate_walk, train_walk
+
+            if args.mode == "evaluate":
+                result = evaluate_walk(runner, wrapped)
+                (output / "evaluation.json").write_text(json.dumps(result, indent=2))
+                print("WALK_EVAL", json.dumps(result["summary"]), flush=True)
+            else:
+                train_walk(runner, wrapped, args, output)
         elif args.mode in ("train", "evaluate"):
             from .evaluation import evaluate
 

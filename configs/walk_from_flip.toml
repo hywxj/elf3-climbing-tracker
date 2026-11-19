@@ -1,0 +1,22 @@
+# Flat-ground, forward command, change speed once, then stop.
+[run]
+segment = "walk"
+flat_ground = true
+no_curriculum = true
+num_envs = 512
+iterations = 1500
+eval_interval = 50
+balance_noise_std = 0.08
+wrist_noise_std = 0.001
+seed = 42
+
+[ppo]
+num_steps_per_env = 48
+save_interval = 50
+empirical_normalization = false
+
+[ppo.algorithm]
+learning_rate = 0.0003
+schedule = "adaptive"
+num_learning_epochs = 4
+clip_param = 0.2
