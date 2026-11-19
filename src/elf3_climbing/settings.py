@@ -13,6 +13,7 @@ RUN_FIELDS = {
     "no_curriculum",
     "flat_ground",
     "wrist_only",
+    "approach_end_frame",
     "no_pose_init",
     "eval_interval",
     "early_stop_patience",
@@ -43,11 +44,13 @@ def load_settings(path=None):
         if key in run and (type(run[key]) is not int or run[key] < 1):
             raise ValueError(f"{key} must be a positive integer")
     for key, choices in {
-        "segment": {"balance", "flip", "stand", "prepare"},
+        "segment": {"balance", "flip", "stand", "prepare", "approach"},
         "reward_stage": {"prior", "refine"},
     }.items():
         if key in run and run[key] not in choices:
             raise ValueError(f"Invalid {key}")
+    if "approach_end_frame" in run and run["approach_end_frame"] not in (73, 128, 173):
+        raise ValueError("approach_end_frame must be 73, 128 or 173")
     for key in ("no_curriculum", "no_pose_init", "flat_ground", "wrist_only"):
         if key in run and type(run[key]) is not bool:
             raise ValueError(f"{key} must be boolean")

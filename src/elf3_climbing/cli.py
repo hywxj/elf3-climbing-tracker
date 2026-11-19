@@ -19,7 +19,10 @@ def parser(settings=None):
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--mode", choices=["smoke", "train", "evaluate", "play"], default="smoke")
     p.add_argument("--reference", type=Path, default=DEFAULT_PACK)
-    p.add_argument("--segment", choices=["balance", "flip", "stand", "prepare"], default="flip")
+    p.add_argument(
+        "--segment", choices=["balance", "flip", "stand", "prepare", "approach"], default="flip"
+    )
+    p.add_argument("--approach-end-frame", type=int, choices=[73, 128, 173], default=128)
     p.add_argument("--num-envs", type=int, default=4)
     p.add_argument("--steps", type=int, default=160)
     p.add_argument("--iterations", type=int, default=100)
@@ -69,6 +72,10 @@ def main():
     )
     if args.output is None:
         p.error("--output is required")
+    if args.segment == "approach" and (
+        not args.checkpoint or not args.flat_ground or not args.no_curriculum
+    ):
+        p.error("Approach continuation requires checkpoint, flat ground and no backward curriculum")
     if (
         min(
             args.num_envs,
@@ -130,6 +137,7 @@ def main():
         cfg.reference_path = str(args.reference)
         cfg.segment = args.segment
         cfg.flat_ground = args.flat_ground
+        cfg.approach_end_frame = args.approach_end_frame
         cfg.random_start = False
         cfg.curriculum_enabled = args.mode == "train" and not args.no_curriculum
         cfg.reward_stage = args.reward_stage
@@ -186,9 +194,22 @@ def main():
             json.dumps(runner_config(settings["ppo"]), indent=2)
         )
         # Construction verifies the actual installed PPO/observation interface even in smoke mode.
+        ppo_cfg = runner_config(settings["ppo"])
+        if args.segment == "approach":
+            import rsl_rl.runners.on_policy_runner as runner_module
+            from .continuation import StandingContinuationActorCritic
+
+            runner_module.StandingContinuationActorCritic = StandingContinuationActorCritic
+            ppo_cfg["policy"]["class_name"] = "StandingContinuationActorCritic"
+            ppo_cfg["policy"]["leg_indices"] = [
+                j
+                for j, n in enumerate(env.reference_np["joint_names"].tolist())
+                if any(part in n for part in ("waist", "hip", "knee", "ankle"))
+            ]
+        (output / "ppo_config.json").write_text(json.dumps(ppo_cfg, indent=2))
         runner = OnPolicyRunner(
             wrapped,
-            runner_config(settings["ppo"]),
+            ppo_cfg,
             log_dir=str(output / "ppo") if args.mode == "train" else None,
             device=env.device,
         )
@@ -201,11 +222,47 @@ def main():
                 raise ValueError(
                     "Start balance from scratch or use a balance checkpoint; flip weights are not a standing prior"
                 )
-            if weights["actor.0.weight"].shape != runner.alg.policy.actor[0].weight.shape:
+            if args.segment == "approach":
+                from .continuation import inherit_standing_checkpoint, freeze_prior_statistics
+
+                if previous_segment not in ("flip", "approach"):
+                    raise ValueError(
+                        "Approach requires the accepted flip prior or its continuation"
+                    )
+                mapped, inherited = inherit_standing_checkpoint(ckpt)
+                missing, unexpected = torch.nn.Module.load_state_dict(
+                    runner.alg.policy, mapped, strict=False
+                )
+                if unexpected or any(
+                    not k.startswith("actor.correction.") and k != "actor.mask" for k in missing
+                ):
+                    raise ValueError(f"Continuation checkpoint mismatch: {missing}, {unexpected}")
+                runner.obs_normalizer.load_state_dict(ckpt["obs_norm_state_dict"])
+                runner.privileged_obs_normalizer.load_state_dict(
+                    ckpt["privileged_obs_norm_state_dict"]
+                )
+                freeze_prior_statistics(runner)
+                env.transfer_report = {
+                    "method": "frozen_standing_flip_plus_zero_initialized_leg_residual",
+                    "source": str(args.checkpoint),
+                    "source_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
+                    "inherited_original_actor": inherited,
+                    "actor_observations": 632,
+                    "critic_observations": 697,
+                    "base_actor_frozen": True,
+                    "actor_normalizer_frozen": True,
+                    "residual_bound_rad": 0.15,
+                    "residual_enabled_after_reference_frame": env.flip_end_frame,
+                }
+                (output / "standing_transfer.json").write_text(
+                    json.dumps(env.transfer_report, indent=2)
+                )
+            elif weights["actor.0.weight"].shape != runner.alg.policy.actor[0].weight.shape:
                 raise ValueError(
                     "Checkpoint observation schema mismatch; implicit padding is forbidden"
                 )
-            runner.load(str(args.checkpoint), load_optimizer=False)
+            if args.segment != "approach":
+                runner.load(str(args.checkpoint), load_optimizer=False)
             if previous_segment == "balance" and args.segment == "flip":
                 if args.mode != "train" or not args.flat_ground or not args.no_curriculum:
                     raise ValueError(

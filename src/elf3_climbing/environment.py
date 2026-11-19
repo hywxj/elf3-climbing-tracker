@@ -80,6 +80,7 @@ class TrackerCfg(DirectRLEnvCfg):
     reference_path: str = str(DEFAULT_PACK)
     segment: str = "flip"
     flat_ground: bool = False
+    approach_end_frame: int = 128
     random_start: bool = False
     curriculum_enabled: bool = False
     reward_stage: str = "prior"
@@ -105,8 +106,8 @@ class TrackerEnv(DirectRLEnv):
 
             self.reference_np, self.task_report = ground_standing_reference(self.reference_np)
             if not self.balance_only:
-                if cfg.segment != "flip":
-                    raise ValueError("Flat-ground override supports flip only")
+                if cfg.segment not in ("flip", "approach"):
+                    raise ValueError("Flat-ground override supports flip/approach only")
                 self.task_report.update(
                     task="flip_ground_v1",
                     flip_required=True,
@@ -121,6 +122,16 @@ class TrackerEnv(DirectRLEnv):
             cfg.extra_budget_steps = 500
         segments = json.loads(str(self.reference_np["segments_json"]))
         segments["balance"] = [0, 0]
+        self.flip_end_frame = int(segments["flip"][1])
+        if cfg.segment == "approach":
+            if not cfg.flat_ground or cfg.approach_end_frame not in (self.flip_end_frame, 128, 173):
+                raise ValueError("Approach requires flat ground and end frame 73, 128 or 173")
+            segments["approach"] = [segments["flip"][0], cfg.approach_end_frame]
+            self.task_report.update(
+                task="flip_to_approach_continuation_v1",
+                scope="Existing flip prefix then reference footsteps; no platform/support",
+                reference_end_frame=cfg.approach_end_frame,
+            )
         prepare = np.flatnonzero(
             np.isin(
                 self.reference_np["phase"],
@@ -140,9 +151,9 @@ class TrackerEnv(DirectRLEnv):
         )
         segments["prepare"] = [int(prepare[0]), int(prepare[-1])]
         if cfg.segment not in segments:
-            raise ValueError("Only balance/flip/stand/prepare tracking experiments are enabled")
+            raise ValueError("Only balance/flip/approach/stand/prepare experiments are enabled")
         self.segment_start, self.segment_end = segments[cfg.segment]
-        if cfg.segment == "flip":
+        if cfg.segment in ("flip", "approach"):
             cfg.end_hold_steps = cfg.flip_hold_steps
             cfg.extra_budget_steps = max(cfg.extra_budget_steps, cfg.end_hold_steps + 50)
         cfg.episode_length_s = (
@@ -452,6 +463,14 @@ class TrackerEnv(DirectRLEnv):
             - d.root_link_pos_w
         )
         goal = torch.where(blocked[:, None], gate_goal, goal)
+        if self.cfg.segment == "approach":
+            # Preserve precisely the old flip actor's goal throughout its prefix.
+            old_goal = (
+                self.ref["root_pos"][self.flip_end_frame]
+                + self.scene.env_origins
+                - d.root_link_pos_w
+            )
+            goal = torch.where((i <= self.flip_end_frame)[:, None], old_goal, goal)
         goal = quat_apply_inverse(yaw, goal)
         _, _, clearance, _ = self.gripper_state()
         protocol_obs = torch.stack(
@@ -463,6 +482,8 @@ class TrackerEnv(DirectRLEnv):
             ],
             dim=-1,
         )
+        if self.cfg.segment == "approach":
+            protocol_obs[:, 3] = (i > self.flip_end_frame).float()
         # Gripper clearance is a task command: contacts alone do not specify wrist roll.
         # Fixed per task, later supplied by the FSM; not a reference-pose observation.
         grip = torch.tensor(
@@ -683,6 +704,17 @@ class TrackerEnv(DirectRLEnv):
             "root_pose": torch.cat([local_root, d.root_link_quat_w], dim=-1).detach().clone(),
             "joint_pos": d.joint_pos[:, self.joint_ids].detach().clone(),
             "joint_vel": d.joint_vel[:, self.joint_ids].detach().clone(),
+            "foot_reference_error_m": torch.linalg.vector_norm(
+                self.site_positions()[:, :2]
+                - self.scene.env_origins[:, None, :]
+                - self.ref["site_pos"][i, :2],
+                dim=-1,
+            )
+            .detach()
+            .clone(),
+            "trunk_tilt_rad": torch.acos((-d.projected_gravity_b[:, 2]).clamp(-1, 1))
+            .detach()
+            .clone(),
             "torque_ratio": (
                 d.applied_torque[:, self.joint_ids].abs()
                 / d.joint_effort_limits[:, self.joint_ids].clamp(min=1e-6)

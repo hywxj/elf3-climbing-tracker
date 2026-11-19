@@ -21,6 +21,11 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
     peak_hold = torch.zeros_like(peak_root)
     gate_ever = torch.zeros_like(active)
     first_gate_time = torch.full_like(peak_root, float("nan"))
+    walk_count = torch.zeros_like(peak_root)
+    walk_wrist_peak = torch.zeros_like(peak_root)
+    walk_velocity_sum = torch.zeros_like(peak_root)
+    walk_tilt_peak = torch.zeros_like(peak_root)
+    walk_foot_peak = torch.zeros_like(peak_root)
     try:
         with torch.inference_mode():
             wrapped.obs, _ = env.reset()
@@ -30,6 +35,18 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
                 actions = runner.alg.policy.act_inference(obs)
                 _, _, done, _ = wrapped.step(actions)
                 m = env.last_metrics
+                walking = active & (m["reference_frame"] > env.flip_end_frame)
+                walk_count[walking] += 1
+                walk_wrist_peak[walking] = torch.maximum(
+                    walk_wrist_peak[walking], m["gripper_error_rad"][walking]
+                )
+                walk_velocity_sum[walking] += m["root_velocity_error_m_s"][walking]
+                walk_tilt_peak[walking] = torch.maximum(
+                    walk_tilt_peak[walking], m["trunk_tilt_rad"][walking]
+                )
+                walk_foot_peak[walking] = torch.maximum(
+                    walk_foot_peak[walking], m["foot_reference_error_m"][walking].amax(-1)
+                )
                 peak_root[active] = torch.maximum(peak_root[active], m["root_error_m"][active])
                 peak_grip[active] = torch.maximum(peak_grip[active], m["gripper_error_rad"][active])
                 peak_hold[active] = torch.maximum(
@@ -44,6 +61,21 @@ def evaluate(runner, wrapped, start_phase=0.0, hold_steps=None):
                         {
                             "environment": k,
                             "steps": step + 1,
+                            "walking_samples": int(walk_count[k]),
+                            "walking_wrist_error_max_rad": float(walk_wrist_peak[k])
+                            if walk_count[k]
+                            else None,
+                            "walking_velocity_error_mean_m_s": float(
+                                walk_velocity_sum[k] / walk_count[k]
+                            )
+                            if walk_count[k]
+                            else None,
+                            "walking_trunk_tilt_max_rad": float(walk_tilt_peak[k])
+                            if walk_count[k]
+                            else None,
+                            "walking_foot_reference_error_max_m": float(walk_foot_peak[k])
+                            if walk_count[k]
+                            else None,
                             "initial_gripper_angle_rad": float(initial_wrist[k]),
                             "terminal_gripper_angle_rad": float(m["joint_pos"][k, env.wrist_joint]),
                             "first_gate_ready_s": float(first_gate_time[k])

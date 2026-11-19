@@ -1,6 +1,6 @@
 {
   "date": "2026-11-19",
-  "scope": "Fixed-scene standing/flip evidence retained. Blind walking integration passed; independent walking evaluation failed. No handover or full-climb acceptance.",
+  "scope": "Current route: continue the accepted standing/flip actor. Frozen prior and independent 5-second prefix regression PASS; first-step tracking FAIL after a four-update pilot. No full climb or deployment acceptance.",
   "offline_tests": {
     "passed": 63,
     "failed": 0,
@@ -1164,6 +1164,88 @@
       "smoke_02 and pilot_01 finished computation but hung during Isaac cleanup; those processes were terminated after result files were written; new skip_cleanup API exits normally",
       "pilot_01 used 0.9 soft limits that clipped reset wrist angle by 0.131 rad; pilot_02 uses actual limits as the accepted flip task does"
     ],
-    "recommended_checkpoint": null
+    "recommended_checkpoint": null,
+    "route_status": "RETIRED_FROM_MAINLINE; code retained in git 081f012; original logs retained"
+  },
+  "standing_to_approach_v1": {
+    "source_checkpoint": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/flip_wrist_stage_01/best.pt",
+    "source_sha256": "f3f6ee0674a78d83f6d736f04ca3ce43fc2645e2fd1649445fcadf4553bd77a7",
+    "method": "Frozen original actor/normalizer plus zero-initialized waist/leg residual; bound 0.15 rad, enabled only after flip reference frame 73",
+    "same_actor_critic_dimensions": [
+      632,
+      697
+    ],
+    "gripper_added_mass_kg": 0.0,
+    "depth_or_lidar_input": false,
+    "analytic_ground_and_reference_contacts_retained": true,
+    "inherited_prefix": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/continuation_prefix_02/evaluation.json",
+      "start_phase": 0.0,
+      "required_hold_steps": 250,
+      "required_hold_s": 5.0,
+      "completed_episodes": 32,
+      "successes": 32,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb"
+    },
+    "four_update_pilot": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/continuation_step_pilot_01",
+      "requested_iterations": 4,
+      "ppo_iterations": 4,
+      "evaluated_iterations": 4,
+      "checkpoint_source": "latest.pt",
+      "partial_block_updates": "none",
+      "stop_reason": "iteration_budget",
+      "changed_actor_parameter_tensors": 4,
+      "standing_feedback_preserved": true,
+      "standing_prefix_success_before": 1.0,
+      "best_iteration": 0,
+      "training_environment_steps": 6144,
+      "curriculum": {
+        "phase": 0.0,
+        "window": 128,
+        "threshold": 0.8,
+        "step": 0.025,
+        "window_completed": 0,
+        "window_success_rate": 0.0,
+        "episodes": 0,
+        "promotions": []
+      },
+      "from_start_success_before": 0.0,
+      "from_start_success_after": 0.0,
+      "tail_success_before": 0.0,
+      "tail_success_after": 0.0,
+      "reward_stage": "prior",
+      "full_climb": "NOT RUN",
+      "qualified_for_deployment": false
+    },
+    "prefix_after_updates": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/continuation_step_pilot_01/standing_prefix_00004.json",
+      "start_phase": 0.0,
+      "required_hold_steps": 250,
+      "required_hold_s": 5.0,
+      "completed_episodes": 32,
+      "successes": 32,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb"
+    },
+    "fresh_process_reload": {
+      "path": "/home/hamlet/humanoid_datasheet/datasets/elf3_climbing/runtime_v1/runs/continuation_prefix_reload_01/evaluation.json",
+      "start_phase": 0.0,
+      "required_hold_steps": 250,
+      "required_hold_s": 5.0,
+      "completed_episodes": 32,
+      "successes": 32,
+      "success_fraction": 1.0,
+      "unfinished": 0,
+      "scope": "Fixed scene, deterministic first episode per clone; not randomized robustness or full climb"
+    },
+    "first_step_tracking": "FAIL",
+    "two_step_approach": "NOT RUN",
+    "wrist_vs_unflipped_gait_comparison": "NOT RUN",
+    "scope": "Prior retention verified; no claim that wrist flip no longer affects gait. Four updates test the training connection, not convergence.",
+    "historical_initial_load_error": "continuation_prefix_01: local RSL ActorCritic.load_state_dict returns bool; switched to torch.nn.Module loader for explicit missing-key validation"
   }
 }

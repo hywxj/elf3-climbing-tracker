@@ -54,8 +54,26 @@ def score(results, track_flip=False):
     )
 
 
+def evaluate_standing_prefix(runner, wrapped):
+    env = wrapped.env
+    end = env.segment_end
+    try:
+        env.segment_end = env.flip_end_frame
+        return evaluate(runner, wrapped, 0.0)
+    finally:
+        env.segment_end = end
+
+
 def train(runner, wrapped, args, output):
     env = wrapped.env
+    continuation = args.segment == "approach"
+    prior_before = evaluate_standing_prefix(runner, wrapped) if continuation else None
+    if continuation:
+        (output / "standing_prefix_before.json").write_text(json.dumps(prior_before, indent=2))
+        if prior_before["success_fraction"] < 0.95:
+            raise RuntimeError(
+                "Inherited standing/flip prefix failed before training; stop continuation"
+            )
     wrist_only = args.wrist_only
     if wrist_only:
         from .transfer import preserve_standing_feedback
@@ -94,13 +112,16 @@ def train(runner, wrapped, args, output):
         "task": env.task_report,
         "transfer": getattr(env, "transfer_report", None),
         "wrist_only": wrist_only,
-        "standing_feedback": "actor hidden layers, other output rows and actor normalizer frozen"
+        "standing_feedback": "inherited actor and actor normalizer frozen; bounded waist/leg residual after flip"
+        if continuation
+        else "actor hidden layers, other output rows and actor normalizer frozen"
         if wrist_only
         else "joint optimization",
         "checkpoint_selection": "full success, continuous hold, then survival and wrist error for flip, then velocity error",
         "reward_version": "tolerant_reference_velocity_v9",
         "reference": str(args.reference),
         "segment": args.segment,
+        "approach_end_frame": env.segment_end if continuation else None,
         "height_source": "ground_truth_boxes",
         "real_lidar": "NOT CONNECTED",
         "gripper_dynamics": env.gripper_mass_report,
@@ -197,6 +218,11 @@ def train(runner, wrapped, args, output):
         best_tail=before["tail"]["success_fraction"],
     )
     before_weights = [p.detach().clone() for p in runner.alg.policy.actor.parameters()]
+    prior_weights = (
+        {k: v.clone() for k, v in runner.alg.policy.actor.base.state_dict().items()}
+        if continuation
+        else None
+    )
     before_actor_norm = {k: v.clone() for k, v in runner.obs_normalizer.state_dict().items()}
     completed = 0
     stop_reason = "iteration_budget"
@@ -222,6 +248,11 @@ def train(runner, wrapped, args, output):
             training_rate = counts["successes"] / max(1, counts["episodes"])
             # Evaluate at PPO boundaries; never insert resets into a collected rollout.
             results = suite(runner, wrapped, phase)
+            if continuation:
+                prior_after = evaluate_standing_prefix(runner, wrapped)
+                (output / f"standing_prefix_{completed:05d}.json").write_text(
+                    json.dumps(prior_after, indent=2)
+                )
             start_rate = results["from_start"]["success_fraction"]
             tail_rate = results["tail"]["success_fraction"]
             phase_rate = results["current"]["success_fraction"]
@@ -237,6 +268,8 @@ def train(runner, wrapped, args, output):
                 completed_iterations=completed,
                 progress=hold_progress,
             )
+            if continuation and prior_after["success_fraction"] < 0.95:
+                reason = "standing_prefix_regression"
             annealed = (
                 not wrist_only
                 and not reason
@@ -250,7 +283,9 @@ def train(runner, wrapped, args, output):
                 with torch.no_grad():
                     runner.alg.policy.log_std[balance_indices] = math.log(exploration.std)
                 env.curriculum.samples.clear()  # New sampling distribution needs a fresh window.
-            improved = score(results, track_flip) > best_score
+            improved = score(results, track_flip) > best_score and (
+                not continuation or prior_after["success_fraction"] >= 0.95
+            )
             info = {
                 "completed_iterations": completed,
                 "curriculum": env.curriculum.state(),
@@ -320,6 +355,16 @@ def train(runner, wrapped, args, output):
         not torch.equal(a, b) for a, b in zip(before_weights, runner.alg.policy.actor.parameters())
     )
     standing_preserved = None
+    if continuation:
+        standing_preserved = all(
+            torch.equal(v, runner.alg.policy.actor.base.state_dict()[k])
+            for k, v in prior_weights.items()
+        ) and all(
+            torch.equal(v, runner.obs_normalizer.state_dict()[k])
+            for k, v in before_actor_norm.items()
+        )
+        if not standing_preserved:
+            raise RuntimeError("Inherited base actor or its normalization changed")
     if wrist_only:
         after_weights = list(runner.alg.policy.actor.parameters())
         body_rows = [j for j in range(29) if j != env.wrist_joint]
@@ -348,6 +393,9 @@ def train(runner, wrapped, args, output):
         "stop_reason": stop_reason,
         "changed_actor_parameter_tensors": updated,
         "standing_feedback_preserved": standing_preserved,
+        "standing_prefix_success_before": prior_before["success_fraction"]
+        if continuation
+        else None,
         "best_iteration": best_iteration,
         "training_environment_steps": completed * runner.num_steps_per_env * env.num_envs,
         "curriculum": env.curriculum.state(),

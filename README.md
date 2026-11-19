@@ -1,49 +1,39 @@
 # ELF3 Climbing Tracker
 
-独立的 Isaac Lab 接触条件跟踪训练原型。**平地站立及参考初始化的夹爪翻转已有固定场景验证；当前推进无视觉平地行走，行走能力尚未验收通过。** 附加夹爪质量为 0 kg，保留安装尺寸和碰撞包络。后续再做策略切换、接近和前臂支撑，最后做负载适应。目前不是完整 ACP 复现，也未完成攀爬。
+独立的 Isaac Lab 接触条件跟踪训练原型。**平地站立及参考初始化的夹爪翻转已有固定场景验证；当前直接延续这些权重学习迈步，行走能力尚未验收通过。** 附加夹爪质量为 0 kg，保留安装尺寸和碰撞包络。后续再做策略切换、接近和前臂支撑，最后做负载适应。目前不是完整 ACP 复现，也未完成攀爬。
 
-代码与数据分开：本仓库保存代码、配置、测试和必要的 PPO 依赖快照；机器人资产和动作在私有 Release `runtime-v1` 的独立数据包中。原 tracker 无需拷贝整个 TienKung-Lab、GMR 或 retarget_tools；新增 `run_walk.py` 目前依赖本地定制 TienKung-Lab 及其已整理的 AMP 数据，不能只下载 runtime-v1 就在另一台机器运行。不修改 Hiking，也没有真机执行入口。
+代码与数据分开：本仓库保存代码、配置、测试和必要的 PPO 依赖快照；机器人资产和动作在私有 Release `runtime-v1` 的独立数据包中。当前主线无需拷贝整个 TienKung-Lab、GMR 或 retarget_tools。不修改 Hiking，也没有真机执行入口。
 
-## 无视觉平地行走（2026-11-19）
+## 当前主线：从站立／翻转延续到迈步
 
-`run_walk.py` 复用本地 `walk_elf3` 的环境和 AMP/PPO，扩展代码位于本仓库的 `walk_env.py`、`walk_data.py`、`walk_cli.py`，不改共享工程。原 `walk_elf3` 默认有障碍地形，本入口显式改为平面；`elf3_continuous_flat` 虽关闭相机，却向演员附加解析地形信息，因此没有直接采用它。
+以已通过的 `flip_wrist_stage_01/best.pt` 为起点，继续同一个 `run.py`、ELF3 模型、632/697维观测及29关节动作接口。保留原 actor 的全部权重及归一化参数，不从头学习平衡。
 
-- Actor：角速度、重力方向、速度命令、29 个关节角偏差/速度/上一动作，96 维 × 10 帧 = 960 维。无深度、雷达、高度图或解析地形。Critic 另外读取真实根线速度与双足接触，共 1010 维。
-- 200 Hz 物理、50 Hz 控制，29 个动作按实际关节名称绑定缩放。腿部允许学习；不沿用翻转阶段的 wrist-only 冻结。**旧站立/翻转检查点没有直接迁入，新行走演员从头学习**，两个入口的观测和动作合同不同。
-- 从约 −75° 的已翻转腕姿开始，学习前进 0.10～0.30 m/s；25% 的重采样命令为停步，每 2～4 秒换一次命令。不是从未翻转状态完成整段动作，翻转→行走的在线切换仍为 NOT RUN。
-- 同一零附加质量的夹爪长方体被附加到每个仿真环境。腕目标为 −1.30898 rad，其他关节没有锁死。软限位使用模型真实范围，避免旧 90% 范围把初始翻转角缩回约 7.5°；没有扩大机械限位。
-- 已有 GMR 数据中 `walk_turn` 类别的 214 条合格候选（168 训练、46 验证）复制到本轮输出的 `walk_data/`，校验原 SHA-256，保留原分组划分。楼梯、斜坡、碎石、跑步机和根节点固定动作不纳入本轮。合格表示通过既有数据筛选，不表示动力学行走已通过。
-- AMP 同时屏蔽专家与模拟状态的左 `wrist_y` 角度/速度两列（AMP70 的 12、41），避免专家姿态拉回夹爪。保留其他特征；手端特征沿用原肘框架虚拟点，不是夹爪接触点。夹爪保持由独立奖励监督。
+新增腰腿调整分支从零输出开始，仅在参考第73帧之后启用，最大目标修正±0.15 rad。上肢和翻转腕不受该分支修改，身体仍运行原实时反馈。原 actor 与其归一化冻结，critic 和新分支可学习。翻转期间动作探索不超过0.001 rad，迈步阶段腰腿探索初值0.02 rad。初始化输出与原策略一致；没有逐帧参考角PD注入。
 
-任务奖励先乘 0.02 s，再与同样按时间缩放的 AMP 奖励按 `0.7 × task + 0.3 × AMP` 混合；停步命令屏蔽 AMP。任务连续系数：速度 +5（向量误差 ≤0.05 m/s 满分，超出按 0.20 m/s 尺度平滑下降）、偏航速度 +1、翻转保持 +1.5、直立 −3、横滚/俯仰角速度 −0.1、垂向速度 −1、关节加速度 −2.5e−7、动作变化 −0.01、能量 −2e−4、限位 −2、足滑移 −0.5、单脚支撑/腾空时长 +1、停步时关节运动 −0.02。失败系数 −100 也经过时间和混合缩放，每次终止实际贡献 −1.4。基础 AMP 系数为 2。没有“速度误差必须精确为零”的条件。
+本阶段学习参考中的“先翻转、再迈步”，不是通用速度指令行走。`approach_end_frame=73` 用于原翻转+5秒站稳回归，128为第一步结束，173为两步接近结束。默认先到128，通过后再扩展；不在单脚摆动中途截断并要求双脚站稳。平地、0 kg附加质量和夹爪包络不变。原 actor 的解析地面高度及接触目标接口保留，**不是纯本体感知策略，也没有接入MID-360**。
 
-本机启动一个新的正式实验（不会自动停止在第 60 轮；3000 是实验预算，不保证收敛）：
+原翻转段的 actor 目标保持原语义，迈步段才切换新目标。训练前和每个更新块后，均复测原始翻转和连续5秒站稳；通过率低于95%停止。结束时逐项核对原 actor 与归一化没有变化。冻结权重不等于新姿态下物理平衡，因此必须保留闭环复测。
+
+目标是尽量减少翻转对行走的影响：先翻转到位再迈步，行走中保持腕姿，避免普通摆臂先验拉回夹爪。评估单独记录迈步阶段腕角峰值误差、速度误差、躯干倾斜和双足参考误差，不把正常翻转过程的腕速度混入行走评价。**尚未完成同一任务下未翻转／翻转的对照，尚未证明翻转对步态无影响。** 先完成带翻转的短步跟踪，再做对照和扰动测试。
+
+本机限定试训命令（200轮实验预算，不保证第一步已收敛）：
 
 ```bash
 cd /home/hamlet/elf3-climbing-repos/climbing_tracker
 conda activate isaac_sim_env
 export ELF3_RUNTIME_ROOT="$HOME/humanoid_datasheet/datasets/elf3_climbing/runtime_v1"
-export TIENKUNG_ROOT="$HOME/TienKung-Lab"
-export PYTHONPATH="$PWD/src:$PWD/third_party/rsl_rl"
-WALK_RUN="$ELF3_RUNTIME_ROOT/runs/blind_walk_$(date +%Y%m%d_%H%M%S)"
-python -u run_walk.py --mode train --headless --num-envs 512 \
-  --iterations 3000 --device cuda:0 --output "$WALK_RUN"
+PYTHONPATH=src:third_party/rsl_rl python -u run.py \
+  --config configs/approach_from_flip.toml --mode train \
+  --num-envs 512 --headless --device cuda:0 \
+  --checkpoint "$ELF3_RUNTIME_ROOT/runs/flip_wrist_stage_01/best.pt" \
+  --output "$ELF3_RUNTIME_ROOT/runs/approach_from_flip_$(date +%Y%m%d_%H%M%S)"
 ```
 
-每 100 轮和正常结束时保存检查点，`latest.pt` 只在正常完成时写入。中断时使用最近的 `model_N.pt`，不存在已验收的 `best.pt`。`--checkpoint` 只接受本行走入口且合同匹配的检查点；不会加载 Hiking 或旧站立模型。运行目录含 `env.yaml`、`agent.yaml`、`contract.json`、数据来源、TensorBoard、结果和完成标记。查看学习曲线时优先看 `Walk/episode_seconds`、`Walk/failure_fraction`、`Walk/velocity_error_m_s` 和 `Walk/wrist_error_rad`，总奖励不能替代评估。
+独立回归将 `--mode train` 改为 `--mode evaluate --approach-end-frame 73 --num-envs 32`，使用待验收延续权重和新输出目录。迈步评估使用128；观看时改为 `--mode play --num-envs 1` 并去掉 `--headless`。CLI拒绝没有检查点、没有平地或启用倒序课程的approach调用。末段人工初始化的通过率不能当作从头完成。
 
-训练后独立检查；保留同一终端的 `$WALK_RUN`，或设为实际运行目录：
+实测：新结构继承原权重后32/32固定场景完成翻转和5秒站稳。32环境4轮腰腿分支更新后，原网络与归一化逐项不变；独立重载后站立回归仍32/32。第一步完整跟踪0/32，尚未学会走。详见 `validation.json`。
 
-```bash
-python -u run_walk.py --mode evaluate --headless --num-envs 32 --device cuda:0 \
-  --checkpoint "$WALK_RUN/latest.pt" \
-  --output "$ELF3_RUNTIME_ROOT/runs/walk_eval_$(date +%Y%m%d_%H%M%S)"
-# 可视化：同一命令改为 --mode play --num-envs 1，并去掉 --headless。
-```
-
-检查流程为站立 2 s→0.2 m/s 前进 4 s→停稳 4 s。通过要求：全过程没有摔倒/非足接触失败，稳态速度误差 <0.10 m/s、腕角峰值误差 <0.18 rad、最后 2 s 平均速度 <0.08 m/s、前进段位移 >0.4 m；至少 95% 环境满足。发生失败后的自动重置不会抹掉失败记录。输出的全环境速度/位移均值仅用于诊断，包含失败后的重置状态；不能当作连续成功轨迹。此协议也不代表已会定位高台或完成与翻转策略的切换。
-
-短测证据统一见 `validation.json`：16 环境两轮集成、512 环境有限更新与独立评估分开记录。**短测权重尚未证明会走，不作为推荐部署或迁移权重。** 新入口当前依赖本机定制环境；迁移 4090 前需另行整理对应依赖与数据包。
+之前从头训练的TienKung-Lab行走入口未继承站立能力，60轮独立评估0/32；已退出主线，删除本轮新增的该入口和适配文件，避免混用。源码对照留在Git提交 `081f012`，日志留在数据区。当前延续路线不依赖本地TienKung-Lab，也不使用那批从头训练权重。
 
 ## 环境准备与短程诊断
 

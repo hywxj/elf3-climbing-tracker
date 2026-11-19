@@ -1,0 +1,26 @@
+# Same tracker/model/interfaces as the accepted flip prior. Begin with one step.
+[run]
+segment = "approach"
+approach_end_frame = 128
+flat_ground = true
+no_curriculum = true
+wrist_only = false
+num_envs = 512
+iterations = 200
+eval_interval = 20
+failure_warmup_iterations = 200
+early_stop_patience = 2
+balance_noise_std = 0.02
+wrist_noise_std = 0.001
+seed = 42
+
+[ppo]
+num_steps_per_env = 48
+save_interval = 20
+
+[ppo.algorithm]
+learning_rate = 0.0001
+schedule = "adaptive"
+num_learning_epochs = 3
+clip_param = 0.1
+entropy_coef = 0.0
