@@ -42,6 +42,57 @@ class GateTests(unittest.TestCase):
         self.assertFalse(allowed.any())
 
 
+class KneeRehearsalTests(unittest.TestCase):
+    def test_rehearsal_uses_only_later_starts_and_keeps_single_env_on_frontier(self):
+        from elf3_climbing.protocol import knee_training_phases
+
+        ids = torch.arange(16)
+        phases = knee_training_phases(ids, 0.8, 0.025)
+        self.assertEqual(int((phases == 0.8).sum()), 12)
+        self.assertEqual(int((phases == 0.825).sum()), 2)
+        self.assertEqual(int((phases == 0.9).sum()), 2)
+        self.assertEqual(float(phases[0]), 0.8)
+        self.assertTrue((knee_training_phases(ids, 0.9, 0.025) == 0.9).all())
+        torch.testing.assert_close(knee_training_phases(ids[3:7], 0.8, 0.025), phases[3:7])
+
+
+    def test_push_off_sees_grounded_trials_from_first_iteration(self):
+        from elf3_climbing.protocol import knee_training_phases
+
+        phases = knee_training_phases(torch.arange(32), 0.875, 0.025, push_phase=0.31)
+        self.assertEqual(int((phases == 0).sum()), 2)
+        self.assertEqual(int((phases == 0.31).sum()), 2)
+        self.assertEqual(int((phases == 0.875).sum()), 20)
+        self.assertEqual(int((phases == 0.9).sum()), 8)
+
+
+    def test_assisted_push_reserves_half_of_envs_for_grounded_starts(self):
+        from elf3_climbing.protocol import knee_training_phases
+
+        ids = torch.arange(32)
+        phases = knee_training_phases(ids, 0.8, 0.025, 0.36, assisted=True)
+        self.assertEqual([int((phases == p).sum()) for p in (0., 0.18, 0.36, 0.8, 0.825, 0.9)],
+                         [8, 4, 4, 8, 4, 4])
+        torch.testing.assert_close(knee_training_phases(ids[5:13], 0.8, 0.025, 0.36, assisted=True),
+                                   phases[5:13])
+
+
+class CurriculumBatchTests(unittest.TestCase):
+    def test_completed_block_counts_ignore_finish_order(self):
+        curriculum = BackwardCurriculum()
+        # Fast successes can precede a final group of timeouts in a vector rollout.
+        curriculum.observe([False] * 128, [0.9] * 128)
+        self.assertTrue(curriculum.promote(0.9, 0.95, sampled_counts=(850, 1024)))
+        self.assertEqual(curriculum.promotions[-1]["sampled_episodes"], 1024)
+
+    def test_small_or_unsuccessful_sample_cannot_promote(self):
+        curriculum = BackwardCurriculum()
+        for counts in [(100, 100), (50, 128)]:
+            self.assertFalse(curriculum.promote(0.9, 1.0, sampled_counts=counts))
+        self.assertFalse(curriculum.promote(0.9, 0.89, sampled_counts=(128, 128)))
+        self.assertFalse(curriculum.promote(0.8, 1.0, sampled_counts=(128, 128)))
+
+
 class GeometryTests(unittest.TestCase):
     def test_signed_boxes(self):
         axes = torch.eye(3).expand(3, -1, -1)
@@ -60,10 +111,10 @@ class GeometryTests(unittest.TestCase):
 
 
 class CurriculumTests(unittest.TestCase):
-    def test_failure_does_not_promote(self):
-        c = BackwardCurriculum(window=4)
-        c.observe([False] * 4, [0.9] * 4)
-        self.assertEqual(c.phase, 0.9)
+    def test_neighboring_small_curriculum_steps_do_not_mix_samples(self):
+        c = BackwardCurriculum(phase=0.875, step=0.025)
+        c.observe([True, False], [0.9, 0.875])
+        self.assertEqual(list(c.samples), [False])
 
     def test_promotion_rejects_stale_easy_episodes(self):
         c = BackwardCurriculum(window=4)
@@ -77,8 +128,10 @@ class CurriculumTests(unittest.TestCase):
         c.promote(0.8, 1.0)
         self.assertEqual(c.phase, 0.7)
 
-    def test_requires_matching_phase_evaluation(self):
+    def test_promotion_requires_successful_samples_and_matching_phase_evaluation(self):
         c = BackwardCurriculum(window=4)
+        c.observe([False] * 4, [0.9] * 4)
+        self.assertFalse(c.promote(0.9, 1.0))
         c.observe([True] * 4, [0.9] * 4)
         self.assertEqual(c.phase, 0.9)
         self.assertFalse(c.promote(0.8, 1.0))
@@ -126,27 +179,16 @@ class TaskSemanticsTests(unittest.TestCase):
 
 
 class VelocityTrackingTests(unittest.TestCase):
-    def test_forward_movement_and_turning_are_allowed(self):
+    def test_velocity_errors_for_commanded_and_uncommanded_motion(self):
         from elf3_climbing.protocol import velocity_tracking_errors
 
-        linear = torch.tensor([[0.7, 0.0, 0.0]])
-        angular = torch.tensor([[0.0, 0.0, 0.8]])
-        le, ae = velocity_tracking_errors(linear, angular, linear, angular)
-        self.assertEqual(le.item(), 0.0)
-        self.assertEqual(ae.item(), 0.0)
-
-    def test_uncommanded_motion_has_error(self):
-        from elf3_climbing.protocol import velocity_tracking_errors
-
-        zero = torch.zeros(1, 3)
-        le, ae = velocity_tracking_errors(torch.tensor([[0.7, 0.0, 0.0]]), zero, zero, zero)
-        self.assertGreater(le.item(), 0.25)
-        self.assertEqual(ae.item(), 0.0)
-
-    def test_neighboring_small_curriculum_steps_do_not_mix_samples(self):
-        c = BackwardCurriculum(phase=0.875, step=0.025)
-        c.observe([True, False], [0.9, 0.875])
-        self.assertEqual(list(c.samples), [False])
+        linear = torch.tensor([[0.7, 0.0, 0.0], [0.7, 0.0, 0.0]])
+        angular = torch.tensor([[0.0, 0.0, 0.8], [0.0, 0.0, 0.0]])
+        targets = linear.clone()
+        targets[1] = 0
+        le, ae = velocity_tracking_errors(linear, angular, targets, angular)
+        torch.testing.assert_close(le, torch.tensor([0.0, 0.7]))
+        torch.testing.assert_close(ae, torch.zeros(2))
 
 
 class HeldReferenceTests(unittest.TestCase):

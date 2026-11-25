@@ -1,0 +1,23 @@
+# First learn the v4 right-knee entry using forearm or wrist tabletop support.
+[run]
+segment = "knee_entry"
+knee_support_rule = "assisted-push"
+knee_wrist_contact = "tabletop"
+num_envs = 1024
+iterations = 3000
+eval_interval = 50
+early_stop_patience = 0
+balance_noise_std = 0.08
+
+[ppo]
+num_steps_per_env = 32
+save_interval = 100
+
+[ppo.algorithm]
+learning_rate = 0.00003
+num_learning_epochs = 2
+num_mini_batches = 4
+entropy_coef = 0.0
+
+[ppo.policy]
+init_noise_std = 0.10

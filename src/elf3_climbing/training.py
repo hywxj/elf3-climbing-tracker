@@ -37,6 +37,24 @@ def score(results, track_flip=False):
         / max(1, len(results["tail"]["episodes"])),
     )
     episodes = results["from_start"]["episodes"]
+    if episodes and "right_knee_supported_max_s" in episodes[0]:
+        # A tail-only specialist can already be perfect while earlier starts improve.
+        current = results.get("current", results["tail"])
+        phase = current.get("start_phase", 0.9)
+        qualified = [(0.9, results["tail"]["success_fraction"]), (phase, current["success_fraction"])]
+        earliest = min((p for p, rate in qualified if rate >= 0.9), default=1.0)
+        quality = (quality[0], quality[1] >= 0.9, 1.0 - earliest, *quality[1:])
+        if "assisted_push_observed" in episodes[0]:
+            n = len(episodes)
+            early = (sum(x["takeoff_observed"] for x in episodes) / n,
+                     sum(x["assisted_push_observed"] for x in episodes) / n,
+                     sum(min(x["simultaneous_support_max_s"], 0.10) for x in episodes) / n)
+            quality = (*quality[:2], *early, *quality[2:])
+        for tag in ("from_start", "tail"):
+            batch = results[tag]["episodes"]
+            quality += (sum(min(x["right_knee_supported_max_s"], results[tag]["required_hold_s"])
+                            for x in batch) / max(1, len(batch)),)
+        return quality + (sum(x["takeoff_observed"] for x in episodes) / len(episodes),)
     if track_flip:
         # Failed motion never outranks equally unsuccessful but surviving motion
         # solely by reaching a wrist angle during a fall.
@@ -86,6 +104,17 @@ def train(runner, wrapped, args, output):
         for j, name in enumerate(env.reference_np["joint_names"].tolist())
         if any(part in name for part in ("waist", "hip", "knee", "ankle"))
     ]
+    arm_indices = [
+        j for j, name in enumerate(env.reference_np["joint_names"].tolist())
+        if env.knee_entry and ("shoulder" in name or "elbow" in name)
+    ]
+    def set_exploration(balance_std):
+        with torch.no_grad():
+            runner.alg.policy.log_std[balance_indices] = math.log(balance_std)
+            if arm_indices:
+                arm_std = runner.policy_cfg["init_noise_std"] * balance_std / args.balance_noise_std
+                runner.alg.policy.log_std[arm_indices] = math.log(arm_std)
+
     restored_balance_std = (
         float(runner.alg.policy.log_std[balance_indices].detach().exp().median())
         if args.checkpoint
@@ -117,8 +146,9 @@ def train(runner, wrapped, args, output):
         else "actor hidden layers, other output rows and actor normalizer frozen"
         if wrist_only
         else "joint optimization",
-        "checkpoint_selection": "full success, continuous hold, then survival and wrist error for flip, then velocity error",
-        "reward_version": "tolerant_reference_velocity_v9",
+        "checkpoint_selection": "from-start success, >=90% tail retention, earliest qualified start, tail success and physical progress"
+        if env.knee_entry else "full success, continuous hold, then survival and wrist error for flip, then velocity error",
+        "reward_version": env.knee_reward.version if env.knee_entry else "tolerant_reference_velocity_v9",
         "reference": str(args.reference),
         "segment": args.segment,
         "approach_end_frame": env.segment_end if continuation else None,
@@ -171,6 +201,7 @@ def train(runner, wrapped, args, output):
         if args.no_pose_init
         else "static gravity-aware action bias"
         if args.segment == "flip"
+        else "zero residual on v4 with measured arm preload" if env.cfg.preload_example
         else "fixed final-pose action bias",
         "eval_interval": args.eval_interval,
         "early_stop_patience": args.early_stop_patience,
@@ -187,11 +218,14 @@ def train(runner, wrapped, args, output):
             restored_balance_std,
             before["current" if env.balance_only else "short_probe"]["success_fraction"],
             args.balance_noise_explicit,
+            precision_cap=0.01 if env.knee_entry else 0.02,
         )
     )
+    if (env.knee_entry and args.checkpoint and not args.balance_noise_explicit
+            and env.transfer_report.get("restored_phase") is not None):
+        exploration.std = min(args.balance_noise_std, restored_balance_std)
     exploration.minimum = min(exploration.minimum, exploration.std)
-    with torch.no_grad():
-        runner.alg.policy.log_std[balance_indices] = math.log(exploration.std)
+    set_exploration(exploration.std)
     contract["exploration"]["balance_minimum_std"] = exploration.minimum
     contract["exploration"]["requested_balance_std"] = args.balance_noise_std
     contract["exploration"]["effective_initial_balance_std"] = exploration.std
@@ -204,6 +238,27 @@ def train(runner, wrapped, args, output):
             runner.alg.policy.log_std.detach().exp().cpu().tolist(),
         )
     )
+    if env.knee_entry:
+        contract["checkpoint_interval"] = runner.save_interval
+        contract.pop("velocity_reward_full_credit_band")
+        contract["rehearsal"] = "3/4 current, 1/8 previous, 1/8 tail; only current starts count for promotion"
+        if env.cfg.knee_support_rule == "assisted-push":
+            contract["checkpoint_selection"] = "From-start success, tail retention, observed takeoff, assisted push, support duration capped at 0.10 s, curriculum progress"
+            contract["rehearsal"] = "1/4 segment start, 1/8 mid-preload, 1/8 extension start, 1/4 current, 1/8 previous, 1/8 tail"
+        contract["exploration"]["balance_schedule"] = "Scale shoulder/elbow noise with waist/leg noise; retain configured wrist precision"
+        if args.checkpoint and env.cfg.curriculum_enabled and before["current"]["success_fraction"] >= 0.9:
+            phase = env.curriculum.phase
+            probe = evaluate(runner, wrapped, phase, sampled=True)
+            promoted = env.curriculum.promote(
+                phase, before["current"]["success_fraction"],
+                sampled_counts=(probe["successes"], env.num_envs),
+            )
+            contract["warm_start_curriculum_probe"] = {
+                "phase": phase, "sampled_successes": probe["successes"], "sampled_episodes": env.num_envs,
+                "deterministic_success_fraction": before["current"]["success_fraction"],
+                "promoted": promoted, "training_start_phase": env.curriculum.phase,
+            }
+            (output / "warm_start_sampled.json").write_text(json.dumps(probe, indent=2))
     (output / "training_contract.json").write_text(json.dumps(contract, indent=2))
     (output / "evaluation_before.json").write_text(json.dumps(before, indent=2))
     track_flip = args.segment == "flip"
@@ -211,7 +266,8 @@ def train(runner, wrapped, args, output):
     best_iteration = 0
     runner.logger_type = "tensorboard"
     save_checkpoint_atomically(
-        runner, output / "best.pt", infos={"completed_iterations": 0, "contract": contract}
+        runner, output / "best.pt", infos={"completed_iterations": 0, "contract": contract,
+                                          "curriculum": env.curriculum.state()}
     )
     guard = EvaluationGuard(
         patience=args.early_stop_patience,
@@ -226,6 +282,13 @@ def train(runner, wrapped, args, output):
         else None
     )
     before_actor_norm = {k: v.clone() for k, v in runner.obs_normalizer.state_dict().items()}
+    def save_numbered_checkpoint(iteration):
+        info = {"completed_iterations": iteration, "contract": contract,
+                "curriculum": env.curriculum.state(), "balance_noise_std": exploration.std}
+        path = output / f"checkpoint_{iteration:05d}.pt"
+        save_checkpoint_atomically(runner, path, infos=info)
+        print(f"CHECKPOINT {iteration}/{args.iterations} {path}", flush=True)
+
     completed = 0
     stop_reason = "iteration_budget"
     results = before
@@ -243,11 +306,14 @@ def train(runner, wrapped, args, output):
             balance_std_used = exploration.std
             block = min(args.eval_interval, args.iterations - completed)
             runner.current_learning_iteration = completed
-            runner.learn(num_learning_iterations=block, init_at_random_ep_len=False)
+            runner.learn(num_learning_iterations=block, init_at_random_ep_len=False,
+                         checkpoint_callback=save_numbered_checkpoint if env.knee_entry else None)
             completed += block
             runner.current_learning_iteration = completed
             counts = dict(zip(env.outcome_names, env.outcome_counts.cpu().tolist()))
-            training_rate = counts["successes"] / max(1, counts["episodes"])
+            sampled = ((counts["current_phase_successes"], counts["current_phase_episodes"])
+                       if env.knee_entry else (counts["successes"], counts["episodes"]))
+            training_rate = sampled[0] / max(1, sampled[1])
             # Evaluate at PPO boundaries; never insert resets into a collected rollout.
             results = suite(runner, wrapped, phase)
             if continuation:
@@ -282,11 +348,15 @@ def train(runner, wrapped, args, output):
                 )
             )
             if annealed:
-                with torch.no_grad():
-                    runner.alg.policy.log_std[balance_indices] = math.log(exploration.std)
+                set_exploration(exploration.std)
                 env.curriculum.samples.clear()  # New sampling distribution needs a fresh window.
             improved = score(results, track_flip) > best_score and (
                 not continuation or prior_after["success_fraction"] >= 0.95
+            )
+            promoted = (
+                not reason and env.cfg.curriculum_enabled
+                and env.curriculum.promote(
+                    phase, phase_rate, sampled_counts=sampled if env.knee_entry and not annealed else None)
             )
             info = {
                 "completed_iterations": completed,
@@ -301,11 +371,6 @@ def train(runner, wrapped, args, output):
             save_checkpoint_atomically(runner, output / "latest.pt", infos=info)
             evaluated_results = results
             evaluated_iterations = completed
-            promoted = (
-                not reason
-                and env.cfg.curriculum_enabled
-                and env.curriculum.promote(phase, phase_rate)
-            )
             record = {
                 "completed_iterations": completed,
                 "phase": phase,
@@ -328,6 +393,21 @@ def train(runner, wrapped, args, output):
                 "stop_reason": reason,
                 "best_iteration": best_iteration,
             }
+            if env.knee_entry:
+                rehearsal_episodes = counts["episodes"] - sampled[1]
+                record["rehearsal_success_fraction"] = (
+                    (counts["successes"] - sampled[0]) / rehearsal_episodes if rehearsal_episodes else None
+                )
+                for tag in ("from_start", "tail"):
+                    episodes = results[tag]["episodes"]
+                    record[f"{tag}_mean_right_knee_hold_s"] = sum(
+                        e["right_knee_supported_max_s"] for e in episodes) / max(1, len(episodes))
+                if env.cfg.knee_support_rule == "assisted-push":
+                    episodes = results["from_start"]["episodes"]
+                    record["from_start_mean_simultaneous_support_s"] = sum(
+                        e["simultaneous_support_max_s"] for e in episodes) / len(episodes)
+                    record["from_start_assisted_push_fraction"] = sum(
+                        e["assisted_push_observed"] for e in episodes) / len(episodes)
             with (output / "evaluation_history.jsonl").open("a") as log:
                 log.write(json.dumps(record) + "\n")
             (output / f"evaluation_{completed:05d}.json").write_text(json.dumps(results, indent=2))

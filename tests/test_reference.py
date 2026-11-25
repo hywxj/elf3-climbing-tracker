@@ -4,12 +4,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
+from io import StringIO
 import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-from elf3_climbing.reference import make_contact_commands, read_pack
-from elf3_climbing.paths import DEFAULT_PACK, URDF, DEFAULT_SOURCE
+from elf3_climbing.reference import make_contact_commands, prepare, read_pack
+from elf3_climbing.paths import DEFAULT_PACK, URDF, DEFAULT_SOURCE, RUNTIME
 
 
 class ContactEvents(unittest.TestCase):
@@ -109,6 +111,43 @@ class LocalReference(unittest.TestCase):
         self.assertFalse(self.meta["full_motion_training_ready"])
         self.assertIn("NOT measured forces", self.meta["labels"])
         self.assertEqual(self.a["contact_mask"].dtype, np.dtype(bool))
+
+
+V4_SOURCE = RUNTIME.parent / "elf3/elf3_full_elbow_climb_demo_v4_candidate.npz"
+
+
+@unittest.skipUnless(V4_SOURCE.is_file(), "Local v4 motion required")
+class ForearmHeightAdaptation(unittest.TestCase):
+    def test_forearm_faces_and_ground_support_survive_height_change(self):
+        with tempfile.TemporaryDirectory() as folder, redirect_stdout(StringIO()):
+            path = Path(folder)
+            prepare(V4_SOURCE, path / "native")
+            prepare(V4_SOURCE, path / "raised", 0.7)
+            native, native_meta = read_pack(path / "native/reference.npz")
+            raised, meta = read_pack(path / "raised/reference.npz")
+        self.assertEqual(meta["source_sha256"], native_meta["source_sha256"])
+        self.assertAlmostEqual(meta["platform_rise_m"], 0.7)
+        np.testing.assert_array_equal(raised["phase"], native["phase"])
+        flags = native["contact_mask"]
+        np.testing.assert_array_equal(raised["contact_mask"], flags)
+        dz = 0.7 - native_meta["platform_rise_m"]
+        for arm in (2, 3):
+            support = flags[:, arm] | flags[:, arm + 2]
+            z_delta = raised["site_pos"][support, arm, 2] - native["site_pos"][support, arm, 2]
+            np.testing.assert_allclose(z_delta, dz, atol=5e-5)
+            before = Rotation.from_quat(native["site_quat"][support, arm], scalar_first=True)
+            after = Rotation.from_quat(raised["site_quat"][support, arm], scalar_first=True)
+            self.assertLess((after * before.inv()).magnitude().max(), 1e-4)
+            slide = raised["site_pos"][support, arm, :2] - native["site_pos"][support, arm, :2]
+            self.assertLess(np.linalg.norm(slide, axis=1).max(), 0.025)
+        first_arm = np.flatnonzero(flags[:, 2:6].any(1))[0]
+        release = np.flatnonzero((np.arange(len(flags)) > first_arm) & ~flags[:, :2].any(1))[0]
+        for key in ("site_pos", "site_quat"):
+            np.testing.assert_array_equal(raised[key][:release, :2], native[key][:release, :2])
+        limits = ET.parse(URDF).getroot()
+        for j, name in enumerate(raised["joint_names"]):
+            limit = limits.find(f'joint[@name="{name}"]/limit')
+            self.assertLessEqual(abs(raised["joint_vel"][:, j]).max(), float(limit.get("velocity")))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 __pycache__/
+.pytest_cache/
 *.py[cod]
 .ruff_cache/
 *.egg-info/
@@ -19,3 +20,4 @@ dist/
 runs/
 logs/
 runtime*/
+MUJOCO_LOG.TXT

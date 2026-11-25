@@ -21,7 +21,7 @@ def parser(settings=None):
     p.add_argument("--reference", type=Path, default=DEFAULT_PACK)
     p.add_argument(
         "--segment",
-        choices=["balance", "flip", "stand", "prepare", "approach", "walk"],
+        choices=["balance", "flip", "stand", "prepare", "approach", "walk", "knee_entry"],
         default="flip",
     )
     p.add_argument("--approach-end-frame", type=int, choices=[73, 128, 173], default=128)
@@ -29,13 +29,21 @@ def parser(settings=None):
     p.add_argument("--steps", type=int, default=160)
     p.add_argument("--iterations", type=int, default=100)
     p.add_argument("--eval-interval", type=int, default=20)
-    p.add_argument("--early-stop-patience", type=int, default=3)
+    p.add_argument("--early-stop-patience", type=int, default=3,
+                   help="Stop after repeated unsuccessful evaluations (0 disables evaluation-based stopping)")
     p.add_argument("--failure-warmup-iterations", type=int, default=200)
     p.add_argument("--wrist-noise-std", type=float, default=0.005)
     p.add_argument("--balance-noise-std", type=float, default=0.08)
     p.add_argument("--reward-stage", choices=["prior", "refine"], default="prior")
     p.add_argument("--checkpoint", type=Path)
+    p.add_argument("--preload-example", type=Path, help="Use reference-relative actions and measured arm preload for knee entry")
+    p.add_argument("--knee-transfer-guide", type=Path, help="Use a physics-validated knee transfer guide with arm feedback")
+    p.add_argument("--knee-support-rule", choices=("assisted-push", "push-off", "continuous"), default="push-off",
+                   help="Use continuous to replay historical forearm support requirements")
+    p.add_argument("--knee-wrist-contact", choices=("full", "distal-only", "tabletop", "tabletop-touch"), default="full",
+                   help="tabletop-touch permits wrist contact on the top face and requires both forearms for support")
     p.add_argument("--play-episodes", type=int, default=0, help="play: 0 loops until window closes")
+    p.add_argument("--play-start-phase", type=float, default=0.0, help="Playback reset fraction within the segment")
     p.add_argument("--play-speed", type=float, default=1.0, help="play: 0.5 is half speed")
     p.add_argument("--view", choices=["rear-left", "front", "left", "right"], default="rear-left")
     p.add_argument("--no-curriculum", action="store_true")
@@ -65,6 +73,11 @@ def main():
     p = parser(settings)
     AppLauncher.add_app_launcher_args(p)
     args = p.parse_args()
+    if args.knee_transfer_guide and not args.preload_example:
+        p.error("--knee-transfer-guide requires --preload-example")
+    if (args.preload_example or args.knee_wrist_contact in ("tabletop", "tabletop-touch")) and (
+            args.segment != "knee_entry" or args.knee_support_rule != "assisted-push"):
+        p.error("Preload examples and tabletop wrists require assisted-push knee entry")
     if args.wrist_only and (
         args.segment != "flip" or not args.flat_ground or args.checkpoint is None
     ):
@@ -86,12 +99,13 @@ def main():
             args.steps,
             args.iterations,
             args.eval_interval,
-            args.early_stop_patience,
             args.failure_warmup_iterations,
         )
         < 1
     ):
         p.error("Counts must be positive")
+    if args.early_stop_patience < 0:
+        p.error("--early-stop-patience must be nonnegative")
     if (
         args.mode in ("evaluate", "play") or args.reward_stage == "refine"
     ) and args.checkpoint is None:
@@ -99,11 +113,12 @@ def main():
     if args.mode == "play" and (
         args.num_envs != 1
         or args.play_episodes < 0
+        or not 0 <= args.play_start_phase <= 1
         or not math.isfinite(args.play_speed)
         or args.play_speed <= 0
     ):
         p.error(
-            "play requires --num-envs 1, nonnegative --play-episodes and positive finite --play-speed"
+            "play requires --num-envs 1, phase in [0,1], nonnegative episodes and positive finite speed"
         )
     if not math.isfinite(args.wrist_noise_std) or not 0 < args.wrist_noise_std <= 0.02:
         p.error("--wrist-noise-std must be in (0, 0.02]")
@@ -140,6 +155,10 @@ def main():
         cfg.sim.device = args.device
         cfg.reference_path = str(args.reference)
         cfg.segment = args.segment
+        cfg.knee_wrist_contact = args.knee_wrist_contact
+        cfg.knee_support_rule = args.knee_support_rule
+        cfg.preload_example = str(args.preload_example.resolve()) if args.preload_example else None
+        cfg.knee_transfer_guide = str(args.knee_transfer_guide.resolve()) if args.knee_transfer_guide else None
         cfg.flat_ground = args.flat_ground
         cfg.approach_end_frame = args.approach_end_frame
         cfg.random_start = False
@@ -233,6 +252,12 @@ def main():
             ckpt = torch.load(args.checkpoint, weights_only=True, map_location=env.device)
             weights = ckpt["model_state_dict"]
             previous_segment = (ckpt.get("infos") or {}).get("contract", {}).get("segment")
+            source_task = ((ckpt.get("infos") or {}).get("contract") or {}).get("task", {})
+            previous_prior = source_task.get("action_prior")
+            if (previous_prior in ("v4_joint_residual_with_arm_preload", "v4_contact_guided_transfer")) != bool(cfg.preload_example):
+                raise ValueError("Checkpoint and requested absolute/reference-relative control modes differ")
+            if source_task.get("transfer_guide_sha256") != env.task_report.get("transfer_guide_sha256"):
+                raise ValueError("Checkpoint and requested knee transfer guide differ")
             if args.segment == "balance" and previous_segment != "balance":
                 raise ValueError(
                     "Start balance from scratch or use a balance checkpoint; flip weights are not a standing prior"
@@ -294,6 +319,28 @@ def main():
                 )
             if args.segment not in ("walk", "approach"):
                 runner.load(str(args.checkpoint), load_optimizer=False)
+                if env.knee_entry and args.mode == "train":
+                    infos = ckpt.get("infos") or {}
+                    old_contract = infos.get("contract") or {}
+                    old_version = old_contract.get("reward_version")
+                    reset_value = old_version != env.knee_reward.version
+                    if reset_value:
+                        with torch.no_grad():
+                            runner.alg.policy.critic[-1].weight.zero_()
+                            runner.alg.policy.critic[-1].bias.zero_()
+                    saved_phase = (infos.get("curriculum") or {}).get("phase")
+                    same_task = (not reset_value and previous_segment == args.segment
+                                 and old_contract.get("reference") == str(args.reference))
+                    restore_frontier = (cfg.curriculum_enabled and same_task
+                                        and isinstance(saved_phase, (float, int))
+                                        and 0 <= saved_phase <= 0.9)
+                    if restore_frontier:
+                        env.curriculum.phase = float(saved_phase)
+                    env.transfer_report = {
+                        "restored_phase": float(saved_phase) if restore_frontier else None,
+                        "source": str(args.checkpoint), "previous_reward_version": old_version,
+                        "value_output_reset": reset_value, "optimizer_loaded": False,
+                    }
             if previous_segment == "balance" and args.segment == "flip":
                 if args.mode != "train" or not args.flat_ground or not args.no_curriculum:
                     raise ValueError(
@@ -339,6 +386,8 @@ def main():
                     runner.alg.policy.actor[-1].bias.copy_(
                         torch.as_tensor(bias, device=env.device, dtype=torch.float32)
                     )
+                elif cfg.preload_example:
+                    runner.alg.policy.actor[-1].bias.zero_()
                 else:
                     runner.alg.policy.actor[-1].bias.copy_(
                         (env.ref["joint_pos"][env.segment_end] - env.nominal[0]) / cfg.action_scale
@@ -361,6 +410,9 @@ def main():
 
             if args.mode == "evaluate":
                 result = evaluate(runner, wrapped, 0.0)
+                if env.knee_entry:
+                    tail = evaluate(runner, wrapped, 0.9)
+                    (output / "evaluation_tail.json").write_text(json.dumps(tail, indent=2))
                 (output / "evaluation.json").write_text(json.dumps(result, indent=2))
                 print(
                     "EVALUATION_RESULT",

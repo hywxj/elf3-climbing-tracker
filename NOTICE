@@ -1,4 +1,5 @@
-RSL-RL: exact local TienKung-Lab rsl_rl snapshot (2.3.1), BSD-3-Clause.
+RSL-RL is based on the local TienKung-Lab 2.3.1 snapshot, BSD-3-Clause.
+The project's OnPolicyRunner patch supports external checkpoint callbacks and completed-iteration counting.
 robot_cfg.py: active ELF3LITE_CFG extracted from local TienKung-Lab; only asset path changed.
 model.py: minimal local retarget_tools/view_motion.py loader and Hiking _robot_mesh_geometry helper; external project imports removed.
 Third-party copyright headers retained. See third_party/rsl_rl/LICENSE and THIRD_PARTY_LICENSE.txt.

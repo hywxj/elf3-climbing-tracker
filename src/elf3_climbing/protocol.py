@@ -57,6 +57,22 @@ def obb_separation(center, axes, half, other_center, other_axes, other_half):
     return gap.amax(-1)
 
 
+def knee_training_phases(env_ids, phase, step, push_phase=None, *, assisted=False):
+    """Rehearse late starts and reserve grounded trials for the push-off task."""
+    phases = torch.full(env_ids.shape, phase, dtype=torch.float64, device=env_ids.device)
+    phases[env_ids % 8 == 3] = 0.9
+    phases[env_ids % 8 == 7] = min(0.9, round(phase + step, 6))
+    if assisted:
+        # Half rehearse the ground sequence, including starts before the extension.
+        phases[env_ids % 4 == 0] = 0.0
+        phases[env_ids % 8 == 2] = push_phase / 2
+        phases[env_ids % 8 == 6] = push_phase
+    elif push_phase is not None:
+        phases[env_ids % 16 == 2] = 0.0
+        phases[env_ids % 16 == 6] = push_phase
+    return phases
+
+
 class BackwardCurriculum:
     """Paper-inspired CSI; thresholds here are ELF3 trial choices, not paper defaults."""
 
@@ -76,18 +92,21 @@ class BackwardCurriculum:
             if abs(float(start) - self.phase) <= 1e-6:
                 self.samples.append(bool(success))
 
-    def promote(self, evaluated_phase, evaluation_success, min_evaluation_success=0.9):
+    def promote(self, evaluated_phase, evaluation_success, min_evaluation_success=0.9, *, sampled_counts=None):
         """Advance once, only after an explicit matching-phase policy evaluation."""
         if abs(float(evaluated_phase) - self.phase) > 1e-6:
             return False
+        count, total = (sum(self.samples), len(self.samples)) if sampled_counts is None else sampled_counts
+        if not 0 <= count <= total:
+            raise ValueError("Invalid sampled episode counts")
+        rate = count / max(1, total)
         if (
-            len(self.samples) == self.window
-            and sum(self.samples) / self.window >= self.threshold
+            total >= self.window
+            and rate >= self.threshold
             and evaluation_success >= min_evaluation_success
             and self.phase > 0
         ):
             old = self.phase
-            rate = sum(self.samples) / self.window
             self.phase = max(0.0, round(self.phase - self.step, 6))
             self.promotions.append(
                 {
@@ -95,6 +114,7 @@ class BackwardCurriculum:
                     "from": old,
                     "to": self.phase,
                     "window_success_rate": rate,
+                    "sampled_episodes": total,
                     "evaluation_success_rate": evaluation_success,
                 }
             )

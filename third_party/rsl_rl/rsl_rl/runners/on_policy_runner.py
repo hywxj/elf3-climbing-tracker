@@ -22,6 +22,7 @@ import os
 import statistics
 import time
 from collections import deque
+from collections.abc import Callable
 
 import torch
 
@@ -145,7 +146,8 @@ class OnPolicyRunner:
         self.current_learning_iteration = 0
         self.git_status_repos = [rsl_rl.__file__]
 
-    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):  # noqa: C901
+    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False, *,
+              checkpoint_callback: Callable[[int], None] | None = None):  # noqa: C901
         # initialize writer
         if self.log_dir is not None and self.writer is None and not self.disable_logs:
             # Launch either Tensorboard or Neptune & Tensorboard summary writer(s), default: Tensorboard.
@@ -277,14 +279,16 @@ class OnPolicyRunner:
 
             stop = time.time()
             learn_time = stop - start
-            self.current_learning_iteration = it
+            self.current_learning_iteration = it if checkpoint_callback is None else it + 1
             # log info
             if self.log_dir is not None and not self.disable_logs:
                 # Log information
                 self.log(locals())
                 # Save model
-                if it % self.save_interval == 0:
+                if checkpoint_callback is None and it % self.save_interval == 0:
                     self.save(os.path.join(self.log_dir, f"model_{it}.pt"))
+                elif checkpoint_callback is not None and (it + 1) % self.save_interval == 0:
+                    checkpoint_callback(it + 1)
 
             # Clear episode infos
             ep_infos.clear()
@@ -297,8 +301,8 @@ class OnPolicyRunner:
                     for path in git_file_paths:
                         self.writer.save_file(path)
 
-        # Save the final model after training
-        if self.log_dir is not None and not self.disable_logs:
+        # With an external checkpoint writer, learn() may just be one block between evaluations.
+        if checkpoint_callback is None and self.log_dir is not None and not self.disable_logs:
             self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
 
     def log(self, locs: dict, width: int = 80, pad: int = 35):

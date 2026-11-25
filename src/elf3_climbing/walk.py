@@ -42,12 +42,13 @@ class Footsteps:
         self.lifted |= (self.flight >= 3) & (height > 0.025)
         landed = self.lifted & loaded & (forward_pos - self.takeoff > 0.045)
         side = landed.long().argmax(1)
-        alternating = moving & (landed.sum(1) == 1) & (side != self.last_side)
-        self.counts += (landed & alternating[:, None]).long()
-        self.last_side = torch.where(alternating, side, self.last_side)
+        counted = moving & (landed.sum(1) == 1) & (side != self.last_side)
+        switched = counted & (self.last_side >= 0)
+        self.counts += (landed & counted[:, None]).long()
+        self.last_side = torch.where(counted, side, self.last_side)
         # Losing both supports invalidates the pending swing (hopping).
         self.lifted &= ~loaded & loaded.flip([1]) & moving[:, None]
-        return alternating
+        return switched
 
 
 def reward_rates(

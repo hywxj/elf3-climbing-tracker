@@ -4,6 +4,7 @@ from torch import nn
 
 from elf3_climbing.walk import Footsteps, HALF, WALK_STEPS, reward_rates, walk_command
 from elf3_climbing.walk_policy import WalkActor
+from elf3_climbing.walk_training import step_summary, walk_checkpoint_score
 
 
 class WalkTaskTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class WalkTaskTests(unittest.TestCase):
         # Sliding forward while loaded never earns a step.
         x += 0.20
         self.assertFalse(update([40, 40], [0.0, 0.0]))
-        for side, expect_credit in ((0, True), (0, False), (1, True)):
+        for side, expect_credit in ((0, False), (0, False), (1, True)):
             force, height = [50, 50], [0.0, 0.0]
             force[side], height[side] = 0, 0.05
             for _ in range(4):
@@ -55,6 +56,30 @@ class WalkTaskTests(unittest.TestCase):
         self.assertEqual(feet.counts.tolist(), [[1, 1]])
         feet.reset(torch.tensor([0]))
         self.assertEqual(feet.counts.tolist(), [[0, 0]])
+
+    def test_checkpoint_prioritizes_completed_walking_over_one_foot_then_falling(self):
+        def result(steps, fallen):
+            episode = {"left_steps": steps[0], "right_steps": steps[1], "terminated": fallen}
+            return dict(
+                step_summary([episode]),
+                walk_success_fraction=0,
+                survived_fraction=int(not fallen),
+                halt_hold_s=0,
+                forward_distance_m=0,
+            )
+
+        stationary = result((0, 0), False)
+        first_then_fall = result((1, 0), True)
+        both_then_fall = result((2, 1), True)
+        safe_pair = result((1, 1), False)
+        self.assertEqual(first_then_fall["alternating_steps"], 0)
+        self.assertEqual(both_then_fall["alternating_steps"], 2)
+        self.assertEqual(both_then_fall["surviving_step_pairs_per_episode"], 0)
+        self.assertGreater(
+            walk_checkpoint_score(stationary), walk_checkpoint_score(first_then_fall)
+        )
+        self.assertGreater(walk_checkpoint_score(stationary), walk_checkpoint_score(both_then_fall))
+        self.assertGreater(walk_checkpoint_score(safe_pair), walk_checkpoint_score(stationary))
 
     def test_velocity_band_and_stop_scoring(self):
         cmd = torch.tensor([0.30, 0.30, 0.30, 0.0, 0.0])

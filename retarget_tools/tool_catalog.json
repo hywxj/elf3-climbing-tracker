@@ -1,0 +1,201 @@
+{
+  "mujoco_v4_reference": "elf3_full_elbow_climb_demo_v4_candidate.npz",
+  "groups": [
+    "常用入口",
+    "v7 生成与修正",
+    "共用基础与导出依赖",
+    "数据重定向与原始筛选"
+  ],
+  "tools": {
+    "view_motion.py": {
+      "group": "常用入口",
+      "purpose": "交互回放；支持后视及逐帧",
+      "cli": true,
+      "local_imports": [
+        "bvh.py",
+        "gripper_geometry.py",
+        "project_paths.py"
+      ]
+    },
+    "inspect_multiview_motion.py": {
+      "group": "常用入口",
+      "purpose": "固定三视角视频、逐帧图谱、FK指标",
+      "cli": true,
+      "local_imports": [
+        "plan_knee_entry.py",
+        "view_motion.py"
+      ]
+    },
+    "audit_ordered_recovery.py": {
+      "group": "常用入口",
+      "purpose": "当前恢复段的几何与接触力检查",
+      "cli": true,
+      "local_imports": [
+        "audit_contact_wrench.py",
+        "audit_foot_separation.py",
+        "refine_recovery_demo.py"
+      ]
+    },
+    "audit_foot_separation.py": {
+      "group": "常用入口",
+      "purpose": "独立足部间距及帧间检查",
+      "cli": true,
+      "local_imports": [
+        "plan_knee_entry.py",
+        "view_motion.py"
+      ]
+    },
+    "audit_contact_wrench.py": {
+      "group": "常用入口",
+      "purpose": "接触力必要条件筛查；不是闭环仿真",
+      "cli": true,
+      "local_imports": [
+        "plan_knee_entry.py",
+        "project_paths.py",
+        "view_motion.py"
+      ]
+    },
+    "render_climbing_demo.py": {
+      "group": "常用入口",
+      "purpose": "原单视角视频及截图",
+      "cli": true,
+      "local_imports": [
+        "view_motion.py"
+      ]
+    },
+    "build_ordered_recovery.py": {
+      "group": "v7 生成与修正",
+      "purpose": "有序收腿、移重心和协调起身",
+      "cli": true,
+      "local_imports": [
+        "refine_recovery_demo.py"
+      ]
+    },
+    "refine_ordered_support_keys.py": {
+      "group": "v7 生成与修正",
+      "purpose": "按实际膝部支撑面修正关键姿态",
+      "cli": true,
+      "local_imports": [
+        "build_ordered_recovery.py",
+        "project_paths.py"
+      ]
+    },
+    "polish_ordered_edge.py": {
+      "group": "v7 生成与修正",
+      "purpose": "修复左膝越棱的插值穿透",
+      "cli": true,
+      "local_imports": [
+        "build_ordered_recovery.py"
+      ]
+    },
+    "project_paths.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "统一路径配置",
+      "cli": false,
+      "local_imports": []
+    },
+    "bvh.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "BVH读取",
+      "cli": false,
+      "local_imports": []
+    },
+    "gripper_geometry.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "左夹爪包络几何",
+      "cli": false,
+      "local_imports": [
+        "project_paths.py"
+      ]
+    },
+    "plan_knee_entry.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "模型上下文 create_context；也保留旧登膝生成入口",
+      "cli": true,
+      "local_imports": [
+        "check_motion.py",
+        "gripper_geometry.py",
+        "project_paths.py",
+        "view_motion.py"
+      ]
+    },
+    "refine_recovery_demo.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "共用 Recovery 类；main 保留 v5 方案",
+      "cli": true,
+      "local_imports": [
+        "audit_foot_separation.py",
+        "plan_knee_entry.py",
+        "project_paths.py",
+        "view_motion.py"
+      ]
+    },
+    "refine_climb_clearance.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "模型碰撞距离及既有状态导出",
+      "cli": true,
+      "local_imports": [
+        "plan_knee_entry.py",
+        "project_paths.py",
+        "view_motion.py"
+      ]
+    },
+    "build_full_elbow_demo.py": {
+      "group": "共用基础与导出依赖",
+      "purpose": "基础生成、全身几何检查和NPZ导出",
+      "cli": true,
+      "local_imports": [
+        "check_motion.py",
+        "gripper_geometry.py",
+        "plan_knee_entry.py",
+        "project_paths.py"
+      ]
+    },
+    "retarget.py": {
+      "group": "数据重定向与原始筛选",
+      "purpose": "本地GMR源数据适配及腕部支撑基线",
+      "cli": true,
+      "local_imports": [
+        "bvh.py",
+        "check_motion.py",
+        "gripper_geometry.py",
+        "project_paths.py",
+        "view_motion.py"
+      ]
+    },
+    "check_motion.py": {
+      "group": "数据重定向与原始筛选",
+      "purpose": "关节、碰撞与接触检查",
+      "cli": true,
+      "local_imports": [
+        "gripper_geometry.py",
+        "screen_support.py",
+        "view_motion.py"
+      ]
+    },
+    "screen_support.py": {
+      "group": "数据重定向与原始筛选",
+      "purpose": "源骨架前臂覆盖筛选",
+      "cli": true,
+      "local_imports": [
+        "bvh.py"
+      ]
+    }
+  },
+  "notes": [
+    "local_imports lists static imports only; subprocess and AST extraction dependencies are described in README."
+  ],
+  "legacy_archive": "/home/hamlet/elf3-climbing-repos/_archive/retarget_tools_legacy_20261118_113114.tar.gz",
+  "removed_legacy_scripts": [
+    "build_preadjust_climb.py",
+    "view_wrist_adjustment.py",
+    "repair_left_gripper.py",
+    "refine_foot_edge.py",
+    "build_assisted_takeoff.py",
+    "build_selective_rollback.py",
+    "polish_recovery_arms.py",
+    "polish_recovery_transitions.py",
+    "refine_recovery_samples.py",
+    "validate_recovery_demo.py"
+  ]
+}

@@ -28,6 +28,8 @@ class EvaluationGuard:
         completed_iterations=0,
         progress=0.0,
     ):
+        if self.patience == 0:
+            return None
         regression = (
             self.best_start >= self.established_success and start_success < self.low_success
         ) or (self.best_tail >= self.established_success and tail_success < self.low_success)
@@ -107,8 +109,8 @@ def finalize_checkpoint(runner, output, completed, contract, interrupted=False):
     return assessed
 
 
-def initial_balance_std(requested, restored, short_success, explicit=False):
+def initial_balance_std(requested, restored, short_success, explicit=False, precision_cap=0.02):
     """A verified short prior starts precision practice; explicit overrides retain ablation control."""
     if restored is not None and short_success >= 0.9 and not explicit:
-        return min(requested, restored, 0.02)
+        return min(requested, restored, precision_cap)
     return requested

@@ -1,0 +1,22 @@
+# v4 forearm support, push-off and right-knee entry. Supply its 0.70 m reference pack.
+[run]
+segment = "knee_entry"
+num_envs = 256
+iterations = 3000
+eval_interval = 10
+failure_warmup_iterations = 200
+early_stop_patience = 0  # Run to the requested iteration count.
+balance_noise_std = 0.08
+
+[ppo]
+num_steps_per_env = 32
+save_interval = 100
+
+[ppo.algorithm]
+learning_rate = 0.000005
+num_learning_epochs = 2
+num_mini_batches = 4
+entropy_coef = 0.0
+
+[ppo.policy]
+init_noise_std = 0.10

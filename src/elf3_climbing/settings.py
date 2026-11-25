@@ -9,6 +9,8 @@ RUN_FIELDS = {
     "steps",
     "segment",
     "reward_stage",
+    "knee_support_rule",
+    "knee_wrist_contact",
     "seed",
     "no_curriculum",
     "flat_ground",
@@ -38,14 +40,19 @@ def load_settings(path=None):
         "iterations",
         "steps",
         "eval_interval",
-        "early_stop_patience",
         "failure_warmup_iterations",
     ):
         if key in run and (type(run[key]) is not int or run[key] < 1):
             raise ValueError(f"{key} must be a positive integer")
+    if "early_stop_patience" in run and (type(run["early_stop_patience"]) is not int or run["early_stop_patience"] < 0):
+        raise ValueError("early_stop_patience must be a nonnegative integer")
+    if "save_interval" in ppo and (type(ppo["save_interval"]) is not int or ppo["save_interval"] < 1):
+        raise ValueError("save_interval must be a positive integer")
     for key, choices in {
-        "segment": {"balance", "flip", "stand", "prepare", "approach", "walk"},
+        "segment": {"balance", "flip", "stand", "prepare", "approach", "walk", "knee_entry"},
         "reward_stage": {"prior", "refine"},
+        "knee_support_rule": {"assisted-push", "push-off", "continuous"},
+        "knee_wrist_contact": {"full", "distal-only", "tabletop", "tabletop-touch"},
     }.items():
         if key in run and run[key] not in choices:
             raise ValueError(f"Invalid {key}")

@@ -12,6 +12,11 @@ from elf3_climbing.training_control import (
 
 
 class GuardTests(unittest.TestCase):
+    def test_zero_patience_runs_through_regression_and_stall(self):
+        guard = EvaluationGuard(patience=0, best_start=1, best_tail=1)
+        for completed in (10, 100, 1000):
+            self.assertIsNone(guard.inspect(0, 0, 0.9, 0, 0, completed_iterations=completed))
+
     def test_stops_sustained_regression(self):
         guard = EvaluationGuard(patience=2, best_start=1, best_tail=1)
         self.assertIsNone(guard.inspect(0, 0, 0.8, 0, 0))
@@ -95,6 +100,45 @@ class ExplorationTests(unittest.TestCase):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_numbered_saves_cross_evaluation_blocks(self):
+        import torch
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from rsl_rl.runners import OnPolicyRunner
+        from elf3_climbing.runner import runner_config
+
+        obs = torch.zeros(4, 3)
+        extras = {"observations": {"critic": obs}}
+        env = SimpleNamespace(num_envs=4, num_actions=1, device="cpu",
+                              get_observations=lambda: (obs, extras),
+                              step=lambda action: (obs, -action[:, 0].square(), torch.zeros(4), extras))
+        cfg = runner_config({"save_interval": 4, "num_steps_per_env": 2,
+                             "policy": {"actor_hidden_dims": [4], "critic_hidden_dims": [4]},
+                             "algorithm": {"num_learning_epochs": 1, "num_mini_batches": 1}})
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)
+            runner = OnPolicyRunner(env, cfg, log_dir=folder, device="cpu")
+            runner.writer = Mock()
+            runner.logger_type = "tensorboard"
+
+            def save(iteration):
+                save_checkpoint_atomically(runner, output / f"checkpoint_{iteration:05d}.pt",
+                                           {"completed_iterations": iteration})
+
+            with patch.object(runner, "log"), patch("rsl_rl.runners.on_policy_runner.store_code_state"):
+                for block in (3, 4, 2):
+                    runner.learn(block, checkpoint_callback=save)
+            self.assertEqual(runner.current_learning_iteration, 9)
+            self.assertEqual(sorted(p.name for p in output.glob("*.pt")),
+                             ["checkpoint_00004.pt", "checkpoint_00008.pt"])
+            for iteration in (4, 8):
+                state = torch.load(output / f"checkpoint_{iteration:05d}.pt", weights_only=True)
+                self.assertEqual(state["iter"], iteration)
+                self.assertEqual(state["infos"]["completed_iterations"], iteration)
+                steps = [s["step"].item() for s in state["optimizer_state_dict"]["state"].values()]
+                self.assertTrue(steps)
+                self.assertEqual(max(steps), iteration)
+
     def test_interrupt_preserves_last_assessed_weights(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder)

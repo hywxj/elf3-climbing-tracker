@@ -8,6 +8,33 @@ from .evaluation import evaluate
 from .training_control import save_checkpoint_atomically
 
 
+def step_summary(records):
+    n = len(records)
+    pairs = [min(r["left_steps"], r["right_steps"]) for r in records]
+    return {
+        "left_steps": sum(r["left_steps"] for r in records) / n,
+        "right_steps": sum(r["right_steps"] for r in records) / n,
+        # The first landing establishes the side for counting subsequent switches.
+        "alternating_steps": sum(max(0, r["left_steps"] + r["right_steps"] - 1) for r in records)
+        / n,
+        "both_feet_stepped_fraction": sum(p > 0 for p in pairs) / n,
+        "surviving_step_pairs_per_episode": sum(
+            p for r, p in zip(records, pairs) if not r["terminated"]
+        )
+        / n,
+    }
+
+
+def walk_checkpoint_score(summary):
+    return (
+        summary["walk_success_fraction"],
+        summary["surviving_step_pairs_per_episode"],
+        summary["survived_fraction"],
+        summary["halt_hold_s"],
+        summary["forward_distance_m"],
+    )
+
+
 @torch.inference_mode()
 def evaluate_walk(runner, wrapped):
     env = wrapped.env
@@ -47,7 +74,7 @@ def evaluate_walk(runner, wrapped):
         "walk_success_fraction": mean("success"),
         "flip_released_fraction": mean("walking_started"),
         "survived_fraction": 1 - mean("terminated"),
-        "alternating_steps": mean("left_steps") + mean("right_steps"),
+        **step_summary(records),
         "forward_distance_m": mean("distance_m"),
         "halt_hold_s": mean("halt_hold_s"),
         "lost_flip_fraction": mean("lost_flip"),
@@ -63,7 +90,7 @@ def evaluate_walk(runner, wrapped):
 def train_walk(runner, wrapped, args, output):
     contract = {
         "segment": "walk",
-        "protocol": "flat_velocity_walk_v1",
+        "protocol": "flat_velocity_walk_v2",
         "height_source": "ground_truth_boxes",
         "gripper_added_mass_kg": wrapped.env.gripper_mass_report["added_mass_kg"],
         "transfer": wrapped.env.transfer_report,
@@ -79,13 +106,7 @@ def train_walk(runner, wrapped, args, output):
         print("WALK_EVAL", completed, json.dumps(s), flush=True)
         if s["flip_hold_5s_fraction"] < 0.95:
             raise RuntimeError("Standing/flip regression below 95%; see walking evaluation")
-        quality = (
-            s["walk_success_fraction"],
-            s["alternating_steps"],
-            s["survived_fraction"],
-            s["halt_hold_s"],
-            s["forward_distance_m"],
-        )
+        quality = walk_checkpoint_score(s)
         infos = {"completed_iterations": completed, "contract": contract}
         save_checkpoint_atomically(runner, output / "latest.pt", infos)
         if best is None or quality > best:

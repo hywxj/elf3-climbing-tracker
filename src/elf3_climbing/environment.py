@@ -22,6 +22,7 @@ from .protocol import (
     advance_gate,
     obb_separation,
     BackwardCurriculum,
+    knee_training_phases,
     premature_step,
     completion_bonus,
     velocity_tracking_errors,
@@ -84,6 +85,10 @@ class TrackerCfg(DirectRLEnvCfg):
     random_start: bool = False
     curriculum_enabled: bool = False
     reward_stage: str = "prior"
+    preload_example: str | None = None
+    knee_transfer_guide: str | None = None
+    knee_wrist_contact: str = "full"
+    knee_support_rule: str = "push-off"
     end_hold_steps: int = 50
     flip_hold_steps: int = 250
     extra_budget_steps: int = 100
@@ -100,6 +105,7 @@ class TrackerEnv(DirectRLEnv):
     def __init__(self, cfg, **kwargs):
         self.reference_np, self.reference_manifest = read_pack(cfg.reference_path)
         self.balance_only = cfg.segment == "balance"
+        self.knee_entry = cfg.segment == "knee_entry"
         self.task_report = {"task": cfg.segment, "flip_required": True}
         if self.balance_only or cfg.flat_ground:
             from .balance import ground_standing_reference
@@ -159,6 +165,11 @@ class TrackerEnv(DirectRLEnv):
         if cfg.segment not in segments:
             raise ValueError(f"Unknown reference segment {cfg.segment}")
         self.segment_start, self.segment_end = segments[cfg.segment]
+        if self.knee_entry:
+            cfg.end_hold_steps = 10
+            self.task_report.update(platform_rise_m=self.reference_manifest["platform_rise_m"],
+                                    required_knee="right", minimum_hold_s=0.20,
+                                    segment_start="bilateral forearm hold")
         if cfg.segment in ("flip", "approach"):
             cfg.end_hold_steps = cfg.flip_hold_steps
             cfg.extra_budget_steps = max(cfg.extra_budget_steps, cfg.end_hold_steps + 50)
@@ -184,6 +195,9 @@ class TrackerEnv(DirectRLEnv):
         self.forbidden_sensor_ids = self.contacts.find_bodies(
             ["torso_link", "waist_z_link", "l_wrist_z_link", "r_wrist_z_link"]
         )[0]
+        self.permitted_wrist_columns = [(col, self.contacts.body_names[body])
+            for col, body in enumerate(self.forbidden_sensor_ids)
+            if cfg.knee_wrist_contact in ("tabletop", "tabletop-touch") and self.contacts.body_names[body] in ("l_wrist_z_link", "r_wrist_z_link")]
         self.ref = {
             k: torch.as_tensor(v, device=self.device, dtype=torch.float32)
             for k, v in self.reference_np.items()
@@ -192,6 +206,20 @@ class TrackerEnv(DirectRLEnv):
         self.starts = torch.full(
             (self.num_envs,), self.segment_start, device=self.device, dtype=torch.long
         )
+        if self.knee_entry:
+            from .isaac_knee_entry import KneeContacts
+            from .knee_reward import KneeEntryReward
+
+            self.knee_contacts = KneeContacts(self)
+            self.knee_reward = KneeEntryReward(self)
+        self.guided_targets = None
+        if cfg.knee_transfer_guide:
+            from .knee_transfer import KneeTransferTargets
+
+            self.guided_targets = KneeTransferTargets(self, cfg.preload_example, cfg.knee_transfer_guide)
+        elif cfg.preload_example:
+            from .guided_knee import GuidedKneeTargets
+            self.guided_targets = GuidedKneeTargets(self, cfg.preload_example)
         self.actions = torch.zeros((self.num_envs, 29), device=self.device)
         self.previous_actions = self.actions.clone()
         self.targets = self.robot.data.default_joint_pos[:, self.joint_ids].clone()
@@ -221,6 +249,9 @@ class TrackerEnv(DirectRLEnv):
             "lost_flip",
             "premature_arm_contact",
         ]
+        if self.knee_entry:
+            self.outcome_names.extend(["sustained_wrist_support", "early_left_knee", "early_right_knee",
+                                       "current_phase_episodes", "current_phase_successes"])
         self.outcome_counts = torch.zeros(
             len(self.outcome_names), dtype=torch.long, device=self.device
         )
@@ -233,6 +264,8 @@ class TrackerEnv(DirectRLEnv):
         self.curriculum_events = []
         self.evaluation_start_phase = None
         self.ref_steps = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        if cfg.knee_transfer_guide:
+            self.reference_wait_steps = torch.zeros_like(self.ref_steps)
         self.gate_settle = self.ref_steps.clone()
         self.end_settle = self.ref_steps.clone()
         self.left_swing_seen = torch.zeros_like(self.ref_steps, dtype=torch.bool)
@@ -263,13 +296,17 @@ class TrackerEnv(DirectRLEnv):
         self.gripper_half = torch.tensor(gc["half_size_m"], device=self.device)
         self.gripper_mount_quat = torch.tensor(gc["mount_quaternion_wxyz"], device=self.device)
         self.target_rates = torch.full((29,), 6.0, device=self.device)
+        if cfg.knee_transfer_guide:
+            self.target_rates.fill_(12.0)
+            self.target_rates.clamp_(max=self.robot.data.joint_vel_limits[0, self.joint_ids])
         self.target_rates[self.wrist_joint] = 1.5
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         # Attach collision geometry and combine explicit inertials on the spawned
         # wrist only. Source USD files remain unchanged.
-        from pxr import UsdPhysics
+        from omni.physx.scripts.physicsUtils import add_ground_plane
+        from pxr import Gf, UsdPhysics
 
         stage = self.sim.stage
         matches = [
@@ -281,6 +318,9 @@ class TrackerEnv(DirectRLEnv):
         ]
         if len(matches) != 1:
             raise ValueError(f"Cannot locate unique left wrist rigid body: {len(matches)}")
+        if self.knee_entry:
+            from .isaac_knee_entry import add_knee_colliders
+            add_knee_colliders(stage, "/World/envs/env_0/Robot")
         gripper = specification()
         gc = sim_utils.CuboidCfg(
             size=tuple(np.array(gripper["half_size_m"]) * 2),
@@ -294,8 +334,19 @@ class TrackerEnv(DirectRLEnv):
             orientation=tuple(gripper["mount_quaternion_wxyz"]),
         )
         self.gripper_mass_report = apply_usd_mass(matches[0])
-        ground = sim_utils.GroundPlaneCfg(physics_material=self.cfg.sim.physics_material)
-        ground.func("/World/ground", ground)
+        # Author the static z=0 plane locally. The stock grid references an online USD.
+        half_width = max(
+            50.0, self.cfg.scene.env_spacing * np.ceil(np.sqrt(self.cfg.scene.num_envs)) / 2
+        )
+        ground_path = add_ground_plane(
+            stage, "/World/ground", "Z", half_width, Gf.Vec3f(0), Gf.Vec3f(0.35)
+        )
+        material = self.cfg.sim.physics_material
+        ground_material_path = f"{ground_path}/physicsMaterial"
+        material.func(ground_material_path, material)
+        sim_utils.bind_physics_material(
+            f"{ground_path}/CollisionPlane", ground_material_path, stage=stage
+        )
         for i, (pos, quat, size) in enumerate(
             zip(
                 self.reference_np["terrain_box_centers_w"],
@@ -334,12 +385,18 @@ class TrackerEnv(DirectRLEnv):
         )
         # Single-body filtered sensors distinguish terrain support from self-contact.
         self.support_sensors = {}
-        for body in dict.fromkeys(self.reference_np["site_bodies"].tolist()):
+        bodies = self.reference_np["site_bodies"].tolist()
+        if self.knee_entry:
+            bodies += ["l_wrist_y_link", "r_wrist_y_link", "l_wrist_z_link", "r_wrist_z_link"]
+        for body in dict.fromkeys(bodies):
+            detailed_contacts = self.knee_entry and (self.cfg.knee_wrist_contact in ("tabletop", "tabletop-touch") or body in (
+                "l_wrist_x_link", "r_wrist_x_link", "r_knee_y_link", "l_ankle_x_link", "r_ankle_x_link"))
             self.support_sensors[body] = ContactSensor(
                 ContactSensorCfg(
                     prim_path="/World/envs/env_.*/Robot/" + body,
                     update_period=0.0,
                     history_length=1,
+                    max_contact_data_count_per_prim=16 if detailed_contacts else 4,
                     filter_prim_paths_expr=[
                         f"/World/envs/env_.*/Platform_{i}"
                         for i in range(len(self.reference_np["terrain_box_centers_w"]))
@@ -347,7 +404,7 @@ class TrackerEnv(DirectRLEnv):
                 )
             )
         self.scene.clone_environments(copy_from_source=False)
-        self.scene.filter_collisions(global_prim_paths=["/World/ground"])
+        self.scene.filter_collisions(global_prim_paths=[ground_path])
         self.scene.articulations["robot"] = self.robot
         self.scene.sensors["contacts"] = self.contacts
         for body, sensor in self.support_sensors.items():
@@ -364,7 +421,10 @@ class TrackerEnv(DirectRLEnv):
         return 3 if self.first_landing else self.cfg.end_hold_steps
 
     def frames(self):
-        return (self.starts + self.ref_steps).clamp(max=self.segment_end)
+        frame = self.starts + self.ref_steps
+        if self.cfg.knee_transfer_guide:
+            frame = frame - self.reference_wait_steps
+        return frame.clamp(max=self.segment_end)
 
     def site_positions(self):
         d = self.robot.data
@@ -471,7 +531,10 @@ class TrackerEnv(DirectRLEnv):
             yaw[:, None, :].expand(-1, 8, -1).reshape(-1, 4), target.reshape(-1, 3)
         ).reshape(self.num_envs, 8, 3)
         target = target * valid[..., None]
-        goal = self.ref["root_pos"][self.segment_end] + self.scene.env_origins - d.root_link_pos_w
+        final_position = self.ref["root_pos"][self.segment_end]
+        if self.cfg.knee_transfer_guide:
+            final_position = self.guided_targets.landing_root_pose[:3]
+        goal = final_position + self.scene.env_origins - d.root_link_pos_w
         gate_goal = (
             self.ref["root_pos"][min(self.approach_barrier - 1, self.segment_end)]
             + self.scene.env_origins
@@ -534,13 +597,14 @@ class TrackerEnv(DirectRLEnv):
             raise ValueError("Nonfinite action")
         self.previous_actions.copy_(self.actions)
         self.actions.copy_(actions.clamp(-3.0, 3.0))
-        if self.balance_only:
-            # Hold the unflipped wrist through its normal actuator, not qpos writes.
+        if self.balance_only or self.knee_entry:
+            # Hold the task wrist angle through its actuator.
             self.actions[:, self.wrist_joint] = (
                 self.fixed_wrist_target - self.nominal[:, self.wrist_joint]
             ) / self.cfg.action_scale
+        command = self._joint_command()
         desired = torch.clamp(
-            self.nominal + self.cfg.action_scale * self.actions,
+            command,
             self.limits[..., 0],
             self.limits[..., 1],
         )
@@ -549,18 +613,29 @@ class TrackerEnv(DirectRLEnv):
         )
         self.targets.copy_((self.targets + delta).clamp(self.limits[..., 0], self.limits[..., 1]))
 
+    def _joint_command(self):
+        if self.guided_targets is not None:
+            return self.guided_targets.desired(self.actions)
+        return self.nominal + self.cfg.action_scale * self.actions
+
     def _apply_action(self):
         self.robot.set_joint_position_target(self.targets, joint_ids=self.joint_ids)
 
     def _measure(self):
         i = self.frames()
         d = self.robot.data
-        rooterr = torch.linalg.vector_norm(
-            d.root_link_pos_w - self.scene.env_origins - self.ref["root_pos"][i], dim=-1
-        )
-        dot = (d.root_link_quat_w * self.ref["root_quat"][i]).sum(-1).abs().clamp(0, 1)
+        position, orientation, joints = (
+            self.ref["root_pos"][i], self.ref["root_quat"][i], self.ref["joint_pos"][i])
+        if self.cfg.knee_transfer_guide:
+            held = (i >= self.segment_end)[:, None]
+            landing = self.guided_targets.landing_root_pose
+            position = torch.where(held, landing[:3], position)
+            orientation = torch.where(held, landing[3:], orientation)
+            joints = torch.where(held, self.guided_targets.landing_joint_pos, joints)
+        rooterr = torch.linalg.vector_norm(d.root_link_pos_w - self.scene.env_origins - position, dim=-1)
+        dot = (d.root_link_quat_w * orientation).sum(-1).abs().clamp(0, 1)
         angle = 2 * torch.acos(dot)
-        qerr = (d.joint_pos[:, self.joint_ids] - self.ref["joint_pos"][i]).square().mean(-1)
+        qerr = (d.joint_pos[:, self.joint_ids] - joints).square().mean(-1)
         return i, rooterr, angle, qerr
 
     def target_root_velocities(self, frames):
@@ -598,11 +673,19 @@ class TrackerEnv(DirectRLEnv):
         blocked = (
             (next_frame >= barrier) & ~self.gate_allowed & (self.starts < self.approach_barrier)
         )
+        if self.cfg.knee_transfer_guide:
+            gate = self.guided_targets.lift_gate_frame
+            # Contact timestamps continue in physical steps while target frames wait.
+            waiting = (self.starts < gate) & (self.frames() == gate) & ~self.knee_contacts.flight
+            self.reference_wait_steps += waiting
         self.ref_steps += (~blocked).long()
         i, pos, angle, qerr = self._measure()
-        forbidden_force = torch.linalg.vector_norm(
-            self.contacts.data.net_forces_w[:, self.forbidden_sensor_ids], dim=-1
-        )
+        monitored = self.contacts.data.net_forces_w[:, self.forbidden_sensor_ids]
+        for col, body in self.permitted_wrist_columns:
+            # Side and edge wrist loads are screened separately at individual contact points.
+            top_z = self.support_sensors[body].data.force_matrix_w[:, 0, self.knee_contacts.upper, 2]
+            monitored[:, col, 2] -= top_z.clamp_min(0)
+        forbidden_force = torch.linalg.vector_norm(monitored, dim=-1)
         forbidden = forbidden_force.amax(-1) > 100.0
         local_root = d.root_link_pos_w - self.scene.env_origins
         feet = self.site_positions()[:, :2] - self.scene.env_origins[:, None, :]
@@ -632,6 +715,9 @@ class TrackerEnv(DirectRLEnv):
         early_arm = (forces[:, 2:4] > 3).any(-1) & ~self.gate_latched
         failure = failure | early_arm
         support = (forces[:, :2] > 5).all(-1)
+        if self.knee_entry:
+            support, invalid_support = self.knee_contacts.measure(i, feet)
+            failure |= invalid_support
         if self.first_landing:
             # Remember physical swing before crediting a subsequent landing.
             left_rise = feet[:, 0, 2] - self.ref["site_pos"][self.flip_end_frame, 0, 2]
@@ -686,21 +772,28 @@ class TrackerEnv(DirectRLEnv):
             timeout = success | expired
         done = failure | timeout
         if self.training_mode:
-            self.outcome_counts += torch.stack(
-                [
-                    done.sum(),
-                    success.sum(),
-                    (expired & ~success & ~failure).sum(),
-                    (done & (pos > 0.45)).sum(),
-                    (done & (angle > 1.1)).sum(),
-                    (done & (qerr > 1.0)).sum(),
-                    (done & forbidden).sum(),
-                    (done & premature).sum(),
-                    (done & collision).sum(),
-                    (done & lost_flip).sum(),
-                    (done & early_arm).sum(),
-                ]
-            )
+            outcomes = [
+                done.sum(),
+                success.sum(),
+                (expired & ~success & ~failure).sum(),
+                (done & (pos > 0.45)).sum(),
+                (done & (angle > 1.1)).sum(),
+                (done & (qerr > 1.0)).sum(),
+                (done & forbidden).sum(),
+                (done & premature).sum(),
+                (done & collision).sum(),
+                (done & lost_flip).sum(),
+                (done & early_arm).sum(),
+            ]
+            if self.knee_entry:
+                measurements = self.knee_contacts.metrics
+                outcomes.extend(
+                    (done & measurements[name]).sum()
+                    for name in ("wrist_support_failure", "left_knee_early", "right_knee_early")
+                )
+                on_current = (self.reset_phase - self.curriculum.phase).abs() < 1e-6
+                outcomes.extend(((done & on_current).sum(), (success & on_current).sum()))
+            self.outcome_counts += torch.stack(outcomes)
             if self.cfg.curriculum_enabled and done.any():
                 self.curriculum.observe(success[done].tolist(), self.reset_phase[done].tolist())
         self.completed += int(done.sum())
@@ -734,6 +827,7 @@ class TrackerEnv(DirectRLEnv):
             "gripper_speed_rad_s": gv.abs().detach().clone(),
             "gripper_clearance_m": clearance.detach().clone(),
             "gate_allowed": self.gate_allowed.detach().clone(),
+            "gripper_ready": ready.detach().clone(),
             "assumed_prerequisite": self.assumed_prerequisite.detach().clone(),
             "reset_frame": self.starts.detach().clone(),
             "reference_frame": i.detach().clone(),
@@ -759,10 +853,14 @@ class TrackerEnv(DirectRLEnv):
             .detach()
             .clone(),
         }
+        if self.knee_entry:
+            self.last_metrics.update(self.knee_contacts.metrics)
         return failure, timeout
 
     def _get_rewards(self):
         i, pos, angle, qerr = self._measure()
+        if self.knee_entry:
+            return self.knee_reward.compute(i, pos, angle, qerr)
         d = self.robot.data
         qvel = (d.joint_vel[:, self.joint_ids] - self.target_joint_velocities(i)).square().mean(-1)
         mask = self.ref["contact_mask"][i]
@@ -858,10 +956,18 @@ class TrackerEnv(DirectRLEnv):
             self.reset_phase[env_ids] = phase
         elif self.use_curriculum and self.cfg.curriculum_enabled:
             phase = self.curriculum.phase
-            self.starts[env_ids] = self.segment_start + round(
-                phase * (self.segment_end - self.segment_start)
-            )
-            self.reset_phase[env_ids] = phase
+            if self.knee_entry:
+                push_phase = None
+                assisted = self.cfg.knee_support_rule == "assisted-push"
+                if self.cfg.knee_support_rule in ("push-off", "assisted-push"):
+                    push_phase = (self.knee_contacts.push_start - self.segment_start) / (self.segment_end - self.segment_start)
+                phases = knee_training_phases(env_ids, phase, self.curriculum.step, push_phase, assisted=assisted)
+                frames = (phases * (self.segment_end - self.segment_start)).round().long()
+                self.starts[env_ids] = self.segment_start + frames
+                self.reset_phase[env_ids] = phases.float()
+            else:
+                self.starts[env_ids] = self.segment_start + round(phase * (self.segment_end - self.segment_start))
+                self.reset_phase[env_ids] = phase
         elif self.cfg.random_start:
             self.starts[env_ids] = torch.randint(
                 self.segment_start,
@@ -875,7 +981,13 @@ class TrackerEnv(DirectRLEnv):
         else:
             self.starts[env_ids] = self.segment_start
             self.reset_phase[env_ids] = 0
+        if self.knee_entry:
+            self.knee_contacts.reset(env_ids)
+            self.knee_reward.reset(env_ids)
         self.ref_steps[env_ids] = 0
+        if self.cfg.knee_transfer_guide:
+            self.reference_wait_steps[env_ids] = 0
+            self.guided_targets.reset(env_ids)
         self.gate_settle[env_ids] = 0
         self.end_settle[env_ids] = 0
         self.left_swing_seen[env_ids] = False

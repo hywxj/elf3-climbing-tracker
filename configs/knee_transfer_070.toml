@@ -1,0 +1,21 @@
+# Train residual joint commands around the physics-validated 0.70 m transfer.
+[run]
+segment = "knee_entry"
+knee_support_rule = "assisted-push"
+knee_wrist_contact = "tabletop"
+no_curriculum = true
+balance_noise_std = 0.004
+wrist_noise_std = 0.002
+
+[ppo]
+num_steps_per_env = 32
+save_interval = 100
+
+[ppo.algorithm]
+learning_rate = 0.000008
+num_learning_epochs = 2
+num_mini_batches = 4
+entropy_coef = 0.0
+
+[ppo.policy]
+init_noise_std = 0.006

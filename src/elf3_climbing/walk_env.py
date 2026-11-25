@@ -113,7 +113,7 @@ class WalkEnv(TrackerEnv):
         load = support_forces[:, :2, 2]
         loaded = load > 20
         height = feet[:, :, 2] - self.floor
-        touchdown = self.footsteps.update(moving, load, height, feet[:, :, :2] @ self.forward)
+        switched_foot = self.footsteps.update(moving, load, height, feet[:, :, :2] @ self.forward)
         contact = loaded & self.was_loaded
         speed_at_sole = (feet[:, :, :2] - self.last_feet[:, :, :2]).norm(dim=-1) / dt
         slip = (speed_at_sole * contact).sum(1) / contact.sum(1).clamp_min(1)
@@ -220,7 +220,7 @@ class WalkEnv(TrackerEnv):
         # No walking reward during the frozen prefix. Issued command and scored transition agree.
         self.rates = {k: v * active for k, v in self.rates.items()}
         self.walk_reward = (
-            sum(self.rates.values()) * dt + 0.12 * touchdown - 2.0 * failure + 3.0 * success
+            sum(self.rates.values()) * dt + 0.12 * switched_foot - 2.0 * failure + 3.0 * success
         )
         self.tick = torch.where(active | start, self.tick + 1, self.tick)
         return failure, expired

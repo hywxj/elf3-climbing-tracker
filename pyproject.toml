@@ -9,6 +9,11 @@ description = "ELF3 reference-guided contact tracker (simulation research)"
 requires-python = ">=3.11,<3.12"
 dependencies = ["numpy>=1.26,<3", "scipy==1.15.3", "mujoco==3.11.0", "tensorboard", "GitPython"]
 
+[project.optional-dependencies]
+test = ["pytest"]
+platform = ["stable-baselines3==2.8.0", "gymnasium==1.2.1"]
+ground-mount = ["onnx==1.21.0"]
+
 [project.scripts]
 elf3-tracker = "elf3_climbing.launch:main"
 
